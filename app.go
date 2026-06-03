@@ -372,39 +372,46 @@ func (a *App) StartScan(connType string, hostID int, scanPath string) string {
 		)
 		if errHist == nil {
 			scanID, _ := resHistory.LastInsertId()
-			// Insert top 15 large / temp / log analysis results for AI indexing
-			categories := []struct {
-				files []scanner.FileInfo
-				cat   string
-			}{
-				{results.LargeFiles, "large"},
-				{results.TempFiles, "temp"},
-				{results.LogFiles, "log"},
-				{results.BackupFiles, "backup"},
-				{results.CacheFiles, "cache"},
-			}
-			for _, cg := range categories {
-				cnt := 0
-				for _, f := range cg.files {
-					if cnt >= 15 {
-						break
-					}
-					_, _ = db.DB.Exec(
-						"INSERT INTO analysis_results (scan_id, path, category, size, risk_score, recommendation) VALUES (?, ?, ?, ?, ?, ?)",
-						scanID, f.Path, cg.cat, f.Size, 0, f.RuleMatch,
-					)
-					cnt++
-				}
-			}
 
-			// Save duplicates metadata
-			for hash, dupPaths := range results.DuplicateGroups {
-				for _, dp := range dupPaths {
-					_, _ = db.DB.Exec(
-						"INSERT INTO duplicate_results (scan_id, file_hash, file_path, file_size) VALUES (?, ?, ?, ?)",
-						scanID, hash, dp.Path, dp.Size,
-					)
+			// Start a transaction for bulk insertions to prevent disk sync bottleneck
+			tx, errTx := db.DB.Begin()
+			if errTx == nil {
+				// Insert top 15 large / temp / log analysis results for AI indexing
+				categories := []struct {
+					files []scanner.FileInfo
+					cat   string
+				}{
+					{results.LargeFiles, "large"},
+					{results.TempFiles, "temp"},
+					{results.LogFiles, "log"},
+					{results.BackupFiles, "backup"},
+					{results.CacheFiles, "cache"},
 				}
+				for _, cg := range categories {
+					cnt := 0
+					for _, f := range cg.files {
+						if cnt >= 15 {
+							break
+						}
+						_, _ = tx.Exec(
+							"INSERT INTO analysis_results (scan_id, path, category, size, risk_score, recommendation) VALUES (?, ?, ?, ?, ?, ?)",
+							scanID, f.Path, cg.cat, f.Size, 0, f.RuleMatch,
+						)
+						cnt++
+					}
+				}
+
+				// Save duplicates metadata
+				for hash, dupPaths := range results.DuplicateGroups {
+					for _, dp := range dupPaths {
+						_, _ = tx.Exec(
+							"INSERT INTO duplicate_results (scan_id, file_hash, file_path, file_size) VALUES (?, ?, ?, ?)",
+							scanID, hash, dp.Path, dp.Size,
+						)
+					}
+				}
+
+				_ = tx.Commit()
 			}
 		}
 
