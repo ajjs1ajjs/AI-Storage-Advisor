@@ -442,7 +442,7 @@ class CustomAPIProvider(AIProvider):
                 ],
                 "temperature": self.temp
             }
-            res = requests.post(url, json=payload, headers=headers, timeout=60)
+            res = requests.post(url, json=payload, headers=headers, timeout=180)
             if res.status_code == 200:
                 return res.json()["choices"][0]["message"]["content"]
             return f"Custom API Error: {res.text}"
