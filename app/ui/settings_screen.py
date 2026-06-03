@@ -208,7 +208,10 @@ class SettingsScreen(QWidget):
             elif name == "Custom API":
                 self.add_field("base_url", "Base URL:", "https://api.openai.com/v1")
                 self.add_field("api_key", "API Key:", "", is_password=True)
-                self.add_field("model", "Model Name:", "gpt-4")
+                
+                default_model = "gpt-4"
+                models = ["gpt-4", "gpt-4-turbo", "gpt-3.5-turbo", "claude-3-5-sonnet", "gemini-1.5-flash"]
+                self.add_dropdown_field("model", "Model Name:", models, default_model, has_fetch_btn=True)
 
             elif name in ("OpenAI API", "Anthropic API", "Gemini API", "DeepSeek API"):
                 self.add_field("api_key", "API Key:", "", is_password=True)
@@ -648,6 +651,8 @@ class SettingsScreen(QWidget):
             provider = GeminiAPIProvider(config)
         elif name == "DeepSeek API":
             provider = DeepSeekAPIProvider(config)
+        elif name == "Custom API":
+            provider = CustomAPIProvider(config)
 
 
         if not provider:
