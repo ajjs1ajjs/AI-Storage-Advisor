@@ -103,11 +103,11 @@ func ScanLocalDisk(ctx context.Context, startPath string, activeRules []rules.Ru
 				return filepath.SkipDir
 			}
 
-			// If scanning a drive root, skip Windows, Program Files, Library, System to avoid locked/system files
+			// If scanning a drive root, skip Windows, Program Files, Library, System, ProgramData to avoid locked/system files
 			cleanStart := filepath.Clean(startPath)
 			parentDir := filepath.Clean(filepath.Dir(path))
 			if parentDir == cleanStart {
-				if nameLower == "windows" || nameLower == "program files" || nameLower == "program files (x86)" || nameLower == "library" || nameLower == "system" {
+				if nameLower == "windows" || nameLower == "program files" || nameLower == "program files (x86)" || nameLower == "library" || nameLower == "system" || nameLower == "programdata" || nameLower == "msocache" || nameLower == "recovery" {
 					return filepath.SkipDir
 				}
 			}
@@ -246,7 +246,7 @@ func ScanLocalDisk(ctx context.Context, startPath string, activeRules []rules.Ru
 				if len(collidingPaths) > 1 {
 					fullGroups := make(map[string][]string)
 					for _, p := range collidingPaths {
-						h, err := getFullHash(ctx, p)
+						h, err := getFastHash(ctx, p)
 						if err != nil {
 							continue
 						}
@@ -310,32 +310,65 @@ func getPrefixHash(filePath string) (string, error) {
 	return hex.EncodeToString(h[:]), nil
 }
 
-func getFullHash(ctx context.Context, filePath string) (string, error) {
+func getFastHash(ctx context.Context, filePath string) (string, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
 		return "", err
 	}
 	defer file.Close()
 
-	h := md5.New()
-	buf := make([]byte, 65536)
-	for {
-		select {
-		case <-ctx.Done():
-			return "", ctx.Err()
-		default:
-		}
+	info, err := file.Stat()
+	if err != nil {
+		return "", err
+	}
+	size := info.Size()
 
-		n, err := file.Read(buf)
-		if n > 0 {
-			h.Write(buf[:n])
+	h := md5.New()
+
+	const portionSize = 1024 * 1024 // 1 MB
+
+	if size <= 2*portionSize {
+		// Read entire file
+		buf := make([]byte, 65536)
+		for {
+			select {
+			case <-ctx.Done():
+				return "", ctx.Err()
+			default:
+			}
+			n, err := file.Read(buf)
+			if n > 0 {
+				h.Write(buf[:n])
+			}
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				return "", err
+			}
 		}
-		if err == io.EOF {
-			break
+	} else {
+		// Read first 1 MB
+		firstBuf := make([]byte, portionSize)
+		_, err = io.ReadFull(file, firstBuf)
+		if err != nil && err != io.ErrUnexpectedEOF {
+			return "", err
 		}
+		h.Write(firstBuf)
+
+		// Seek to last 1 MB
+		_, err = file.Seek(size-portionSize, io.SeekStart)
 		if err != nil {
 			return "", err
 		}
+
+		lastBuf := make([]byte, portionSize)
+		_, err = io.ReadFull(file, lastBuf)
+		if err != nil && err != io.ErrUnexpectedEOF {
+			return "", err
+		}
+		h.Write(lastBuf)
 	}
+
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
