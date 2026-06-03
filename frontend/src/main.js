@@ -575,19 +575,21 @@ function populateFilesTable(tableId, filesList) {
         return;
     }
 
+    const rows = [];
     filesList.forEach(f => {
         // Safe string escapes for onclick arguments
         const escapedPath = f.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
         
-        tbody.innerHTML += `<tr>
+        rows.push(`<tr>
             <td style="word-break: break-all;">${f.path}</td>
             <td style="white-space: nowrap;">${f.size_formatted}</td>
             <td style="color: var(--text-secondary);">${f.rule_match || '-'}</td>
             <td class="col-action">
                 <button class="btn-icon delete" onclick="confirmSingleDelete(this, '${escapedPath}')">🗑️</button>
             </td>
-        </tr>`;
+        </tr>`);
     });
+    tbody.innerHTML = rows.join('');
 }
 
 function renderDuplicatesPane(dupGroups) {
@@ -599,29 +601,31 @@ function renderDuplicatesPane(dupGroups) {
         return;
     }
 
+    const cards = [];
     Object.entries(dupGroups).forEach(([hash, list]) => {
-        let rowsHtml = '';
+        const rows = [];
         list.forEach(dp => {
             const escapedPath = dp.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-            rowsHtml += `<div class="duplicate-path-row">
+            rows.push(`<div class="duplicate-path-row">
                 <span class="duplicate-path">${dp.path}</span>
                 <div style="display: flex; align-items: center; gap: 10px;">
                     <span style="color: var(--text-secondary); font-size: 11px;">${dp.size_formatted}</span>
                     <button class="btn-icon delete" onclick="confirmSingleDelete(this, '${escapedPath}')">🗑️</button>
                 </div>
-            </div>`;
+            </div>`);
         });
 
-        container.innerHTML += `<div class="duplicate-group-card">
+        cards.push(`<div class="duplicate-group-card">
             <div class="duplicate-group-header">
                 <span>Хеш групи: ${hash.substring(0, 12)}...</span>
                 <span>Знайдено копій: ${list.length}</span>
             </div>
             <div class="duplicate-group-paths">
-                ${rowsHtml}
+                ${rows.join('')}
             </div>
-        </div>`;
+        </div>`);
     });
+    container.innerHTML = cards.join('');
 }
 
 // ----------------------------------------------------

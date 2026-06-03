@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -290,7 +291,56 @@ func ScanLocalDisk(ctx context.Context, startPath string, activeRules []rules.Ru
 	// Apply rules engine logic to flag files
 	results = rules.ProcessRules(results, activeRules)
 
+	// Sort and limit file lists by size descending to prevent UI rendering hangs and reduce IPC payload size
+	results.LargeFiles = sortAndLimitFiles(results.LargeFiles, 200)
+	results.TempFiles = sortAndLimitFiles(results.TempFiles, 200)
+	results.LogFiles = sortAndLimitFiles(results.LogFiles, 200)
+	results.BackupFiles = sortAndLimitFiles(results.BackupFiles, 200)
+	results.CacheFiles = sortAndLimitFiles(results.CacheFiles, 200)
+	results.DuplicateGroups = limitDuplicateGroups(results.DuplicateGroups, 200)
+
 	return results, nil
+}
+
+func sortAndLimitFiles(files []FileInfo, limit int) []FileInfo {
+	sort.Slice(files, func(i, j int) bool {
+		return files[i].Size > files[j].Size
+	})
+	if len(files) > limit {
+		return files[:limit]
+	}
+	return files
+}
+
+type dupGroupWasted struct {
+	hash  string
+	info  []DuplicateFileInfo
+	waste int64
+}
+
+func limitDuplicateGroups(groups map[string][]DuplicateFileInfo, limit int) map[string][]DuplicateFileInfo {
+	if len(groups) <= limit {
+		return groups
+	}
+
+	wastedList := make([]dupGroupWasted, 0, len(groups))
+	for h, list := range groups {
+		var waste int64
+		if len(list) > 1 {
+			waste = int64(len(list)-1) * list[0].Size
+		}
+		wastedList = append(wastedList, dupGroupWasted{hash: h, info: list, waste: waste})
+	}
+
+	sort.Slice(wastedList, func(i, j int) bool {
+		return wastedList[i].waste > wastedList[j].waste
+	})
+
+	result := make(map[string][]DuplicateFileInfo)
+	for i := 0; i < limit && i < len(wastedList); i++ {
+		result[wastedList[i].hash] = wastedList[i].info
+	}
+	return result
 }
 
 func getPrefixHash(filePath string) (string, error) {
