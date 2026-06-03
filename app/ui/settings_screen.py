@@ -410,21 +410,25 @@ class SettingsScreen(QWidget):
                                 combo.clear()
                                 combo.addItems(v)
 
-                    # Second pass: restore values
+                    # Second pass: restore values (check QComboBox BEFORE QLineEdit
+                    # because editable QComboBox contains an internal QLineEdit)
                     for k, v in config.items():
                         if k.endswith('_list'):
                             continue
+                        # Try QComboBox first
+                        combo = self.form_widget.findChild(QComboBox, k)
+                        if combo:
+                            idx = combo.findText(str(v))
+                            if idx >= 0:
+                                combo.setCurrentIndex(idx)
+                            else:
+                                combo.addItem(str(v))
+                                combo.setCurrentText(str(v))
+                            continue
+                        # Then try QLineEdit
                         inp = self.form_widget.findChild(QLineEdit, k)
                         if inp:
                             inp.setText(str(v))
-                        else:
-                            combo = self.form_widget.findChild(QComboBox, k)
-                            if combo:
-                                idx = combo.findText(str(v))
-                                if idx >= 0:
-                                    combo.setCurrentIndex(idx)
-                                else:
-                                    combo.setCurrentText(str(v))
         except Exception as e:
             logger.error(f"Error loading setting data: {e}")
 
