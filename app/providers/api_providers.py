@@ -431,14 +431,13 @@ class CustomAPIProvider(AIProvider):
             self.temp = 0.7
 
     def test_connection(self) -> tuple[bool, str]:
-        if not self.api_key:
-            return False, "API key is missing."
         try:
             url = f"{self.base_url}/chat/completions"
             headers = {
-                "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json"
             }
+            if self.api_key:
+                headers["Authorization"] = f"Bearer {self.api_key}"
             payload = {
                 "model": self.model,
                 "messages": [{"role": "user", "content": "Ping"}],
@@ -455,9 +454,10 @@ class CustomAPIProvider(AIProvider):
         try:
             url = f"{self.base_url}/chat/completions"
             headers = {
-                "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json"
             }
+            if self.api_key:
+                headers["Authorization"] = f"Bearer {self.api_key}"
             payload = {
                 "model": self.model,
                 "messages": [
@@ -502,11 +502,11 @@ class CustomAPIProvider(AIProvider):
         return self._query(system, user)
 
     def get_available_models(self) -> list[str]:
-        if not self.api_key:
-            raise Exception("API Key is missing. Please enter it first.")
         try:
             url = f"{self.base_url}/models"
-            headers = {"Authorization": f"Bearer {self.api_key}"}
+            headers = {}
+            if self.api_key:
+                headers["Authorization"] = f"Bearer {self.api_key}"
             res = requests.get(url, headers=headers, timeout=10)
             if res.status_code == 200:
                 models = sorted([m["id"] for m in res.json().get("data", [])])
