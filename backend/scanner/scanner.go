@@ -102,6 +102,16 @@ func ScanLocalDisk(ctx context.Context, startPath string, activeRules []rules.Ru
 				nameLower == "__pycache__" || nameLower == ".idea" || nameLower == ".vscode" {
 				return filepath.SkipDir
 			}
+
+			// If scanning a drive root, skip Windows, Program Files, Library, System to avoid locked/system files
+			cleanStart := filepath.Clean(startPath)
+			parentDir := filepath.Clean(filepath.Dir(path))
+			if parentDir == cleanStart {
+				if nameLower == "windows" || nameLower == "program files" || nameLower == "program files (x86)" || nameLower == "library" || nameLower == "system" {
+					return filepath.SkipDir
+				}
+			}
+
 			return nil
 		}
 
@@ -197,6 +207,17 @@ func ScanLocalDisk(ctx context.Context, startPath string, activeRules []rules.Ru
 
 	// Duplicates matching: prefix hash -> full hash
 	duplicateGroups := make(map[string][]DuplicateFileInfo)
+
+	totalGroups := 0
+	for _, paths := range sizeGroups {
+		if len(paths) > 1 {
+			totalGroups++
+		}
+	}
+
+	currentGroup := 0
+	lastEmitTime = time.Now()
+
 	for size, paths := range sizeGroups {
 		select {
 		case <-ctx.Done():
@@ -205,6 +226,11 @@ func ScanLocalDisk(ctx context.Context, startPath string, activeRules []rules.Ru
 		}
 
 		if len(paths) > 1 {
+			currentGroup++
+			if time.Since(lastEmitTime) > 200*time.Millisecond || currentGroup == 1 || currentGroup == totalGroups {
+				progressCallback(fmt.Sprintf("Аналіз дублікатів (%d/%d)...", currentGroup, totalGroups), filesScanned, totalSize)
+				lastEmitTime = time.Now()
+			}
 			// Group by prefix hash
 			prefixGroups := make(map[string][]string)
 			for _, p := range paths {
