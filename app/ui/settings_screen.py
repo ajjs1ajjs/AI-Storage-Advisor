@@ -401,7 +401,19 @@ class SettingsScreen(QWidget):
                     config_json = vault.decrypt(config_encrypted)
                     config = json.loads(config_json)
                     
+                    # First pass: restore combo item lists (from fetched models)
                     for k, v in config.items():
+                        if k.endswith('_list') and isinstance(v, list):
+                            combo_name = k[:-5]  # strip '_list' suffix
+                            combo = self.form_widget.findChild(QComboBox, combo_name)
+                            if combo:
+                                combo.clear()
+                                combo.addItems(v)
+
+                    # Second pass: restore values
+                    for k, v in config.items():
+                        if k.endswith('_list'):
+                            continue
                         inp = self.form_widget.findChild(QLineEdit, k)
                         if inp:
                             inp.setText(str(v))
@@ -528,6 +540,10 @@ class SettingsScreen(QWidget):
             for combo in self.form_widget.findChildren(QComboBox):
                 if combo.objectName():
                     config[combo.objectName()] = combo.currentText().strip()
+                    # Save the full list of items so we can restore fetched models later
+                    items = [combo.itemText(i) for i in range(combo.count())]
+                    if items:
+                        config[f"{combo.objectName()}_list"] = items
 
             config_json = json.dumps(config)
             config_encrypted = vault.encrypt(config_json)
