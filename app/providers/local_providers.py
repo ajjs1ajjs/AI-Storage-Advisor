@@ -47,13 +47,7 @@ class OllamaProvider(AIProvider):
             return f"Ollama request failed: {e}"
 
     def generate_recommendations(self, disk_summary: str, files_list: list) -> str:
-        system = (
-            "You are an SRE Storage Analytics assistant. Help the user optimize their disk space. "
-            "You MUST write your response entirely in Ukrainian language. "
-            "For each specific file path you recommend to delete, you MUST append a markdown link next to it in the exact format: "
-            "[Видалити](delete://<absolute_path>). For example: "
-            "'- C:\\Users\\Admin\\AppData\\Local\\Temp\\test.log (12.4 MB) - [Видалити](delete://C:/Users/Admin/AppData/Local/Temp/test.log)'."
-        )
+        system = self.get_recommendation_system_prompt()
         user = f"Review the disk state and suggest items to clean up.\nDisk Status:\n{disk_summary}\n\nTop Large / Temp / Log files found:\n"
         for idx, f in enumerate(files_list[:15]):
             user += f"- {f['path']} ({f['size_formatted']}) - Category: {f['category']}\n"
@@ -131,13 +125,7 @@ class LMStudioProvider(AIProvider):
             return f"LM Studio request failed: {e}"
 
     def generate_recommendations(self, disk_summary: str, files_list: list) -> str:
-        system = (
-            "You are an SRE Storage Analytics assistant. Help the user optimize their disk space. "
-            "You MUST write your response entirely in Ukrainian language. "
-            "For each specific file path you recommend to delete, you MUST append a markdown link next to it in the exact format: "
-            "[Видалити](delete://<absolute_path>). For example: "
-            "'- C:\\Users\\Admin\\AppData\\Local\\Temp\\test.log (12.4 MB) - [Видалити](delete://C:/Users/Admin/AppData/Local/Temp/test.log)'."
-        )
+        system = self.get_recommendation_system_prompt()
         user = f"Review the disk state and suggest items to clean up.\nDisk Status:\n{disk_summary}\n\nTop Large / Temp / Log files found:\n"
         for idx, f in enumerate(files_list[:15]):
             user += f"- {f['path']} ({f['size_formatted']}) - Category: {f['category']}\n"
