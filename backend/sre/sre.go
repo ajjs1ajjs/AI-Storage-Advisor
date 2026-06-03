@@ -1,6 +1,7 @@
 package sre
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -9,6 +10,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type FolderInfo struct {
@@ -160,7 +162,11 @@ func AnalyzeLocalDocker() SreReport {
 		return report
 	}
 
-	cmd := exec.Command("docker", "ps", "-a", "--size", "--format", "{{.ID}}|{{.Names}}|{{.Image}}|{{.Size}}")
+	// Use a 2-second timeout context to prevent indefinite hangs if the Docker daemon is unresponsive/frozen
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "docker", "ps", "-a", "--size", "--format", "{{.ID}}|{{.Names}}|{{.Image}}|{{.Size}}")
 	out, err := cmd.Output()
 	if err != nil {
 		return report
@@ -192,8 +198,11 @@ func AnalyzeLocalDocker() SreReport {
 		})
 	}
 
-	// Get volumes
-	volCmd := exec.Command("docker", "system", "df", "-v")
+	// Get volumes with a 2-second timeout context as well
+	volCtx, volCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer volCancel()
+
+	volCmd := exec.CommandContext(volCtx, "docker", "system", "df", "-v")
 	volOut, err := volCmd.Output()
 	if err == nil {
 		volLines := strings.Split(string(volOut), "\n")
