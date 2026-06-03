@@ -118,20 +118,38 @@ func AnalyzeWindowsSystem() SreReport {
 		if _, err := os.Stat(path); err == nil {
 			var size int64
 			var count int
-			errWalk := filepath.Walk(path, func(p string, info os.FileInfo, errWalk error) error {
+
+			// Walk directory with a 1-second timeout to prevent hangs on large system folders
+			walkCtx, walkCancel := context.WithTimeout(context.Background(), 1*time.Second)
+
+			errWalk := filepath.WalkDir(path, func(p string, d os.DirEntry, errWalk error) error {
+				select {
+				case <-walkCtx.Done():
+					return walkCtx.Err() // Abort walk on timeout
+				default:
+				}
+
 				if errWalk != nil {
 					return nil
 				}
-				if !info.IsDir() {
-					size += info.Size()
-					count++
+				if !d.IsDir() {
+					info, errInfo := d.Info()
+					if errInfo == nil {
+						size += info.Size()
+						count++
+					}
 				}
 				return nil
 			})
-			if errWalk == nil {
+			walkCancel()
+
+			if errWalk == nil || errWalk == context.DeadlineExceeded {
 				fInfo.Size = size
 				fInfo.Count = count
 				fInfo.SizeFormatted = FormatSize(size)
+				if errWalk == context.DeadlineExceeded {
+					fInfo.SizeFormatted += " (Частково)"
+				}
 			} else {
 				fInfo.SizeFormatted = "Access Denied"
 			}
