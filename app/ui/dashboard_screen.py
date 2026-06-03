@@ -484,8 +484,18 @@ class DashboardScreen(QWidget):
         self.btn_ai_cleanup.setVisible(False)
         self.status_lbl.setText("Звернення до моделі ШІ для отримання рекомендацій...")
         
+        conn_type = self.combo_conn.currentText()
+        os_type = "Windows"
+        if conn_type == "SSH Remote Linux":
+            os_type = "Linux"
+        elif conn_type == "Local Scan":
+            import platform
+            os_type = platform.system()
+            
         disk_summary = (
-            f"Path: {self.path_input.text()}\n"
+            f"Connection Type: {conn_type}\n"
+            f"Target Operating System: {os_type}\n"
+            f"Scan Path: {self.path_input.text()}\n"
             f"Total scanned: {self.scan_results['total_size_formatted']}\n"
             f"File count: {self.scan_results['files_scanned']}"
         )
