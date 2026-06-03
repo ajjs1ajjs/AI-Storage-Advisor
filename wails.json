@@ -1,7 +1,7 @@
 {
   "$schema": "https://wails.io/schemas/config.v2.json",
-  "name": "aisadvisor",
-  "outputfilename": "aisadvisor",
+  "name": "AI Storage Advisor",
+  "outputfilename": "AI Storage Advisor",
   "frontend:install": "npm install",
   "frontend:build": "npm run build",
   "frontend:dev:watcher": "npm run dev",
