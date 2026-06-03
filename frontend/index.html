@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8"/>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+    <title>AI Storage Advisor</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body class="dark-theme">
+    <div id="app" class="app-container">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo-icon">🤖</div>
+                <h2 class="logo-title">AI Storage</h2>
+            </div>
+            
+            <div class="divider"></div>
+            
+            <nav class="sidebar-nav">
+                <button class="nav-btn active" id="btn-nav-dashboard">
+                    <span class="nav-icon">📊</span> Dashboard
+                </button>
+                <button class="nav-btn" id="btn-nav-settings">
+                    <span class="nav-icon">⚙️</span> Settings
+                </button>
+            </nav>
+            
+            <div class="sidebar-footer">
+                <button class="theme-toggle-btn" id="btn-theme-toggle">
+                    <span class="theme-icon">☀️</span> <span class="theme-text">Світла тема</span>
+                </button>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="content-area">
+            <!-- 1. Dashboard Tab -->
+            <section class="tab-content" id="tab-dashboard">
+                <!-- Scan Control Top Bar -->
+                <div class="card scan-control-bar">
+                    <div class="scan-row-top">
+                        <div class="form-group inline">
+                            <label for="select-conn-type">Тип підключення:</label>
+                            <select id="select-conn-type" class="form-select">
+                                <option value="Local Scan">Локальний диск</option>
+                                <option value="SSH Remote Linux">SSH Сервер (Linux)</option>
+                                <option value="Network Share (UNC)">Мережева папка (UNC)</option>
+                            </select>
+                        </div>
+                        
+                        <div class="form-group inline hidden" id="ssh-server-picker-group">
+                            <label for="select-ssh-server">SSH Сервер:</label>
+                            <select id="select-ssh-server" class="form-select">
+                                <option value="">-- Пряме введення --</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- SSH Credentials Block (Visible only when SSH is active) -->
+                    <div class="ssh-credentials-block hidden" id="ssh-creds-container">
+                        <div class="form-grid-3">
+                            <div class="form-group">
+                                <label for="input-ssh-host">IP / Хост:</label>
+                                <input type="text" id="input-ssh-host" placeholder="напр. 192.168.1.100" class="form-input">
+                            </div>
+                            <div class="form-group">
+                                <label for="input-ssh-user">Користувач:</label>
+                                <input type="text" id="input-ssh-user" placeholder="напр. root" class="form-input">
+                            </div>
+                            <div class="form-group">
+                                <label for="input-ssh-pass">Пароль:</label>
+                                <input type="password" id="input-ssh-pass" placeholder="Пароль" class="form-input">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="scan-row-bottom">
+                        <div class="form-group path-input-group">
+                            <label for="input-scan-path" id="lbl-scan-path">Шлях сканування:</label>
+                            <div class="path-input-wrapper">
+                                <input type="text" id="input-scan-path" class="form-input" value=".">
+                                <button id="btn-browse-folder" class="btn btn-secondary">📁 Огляд</button>
+                            </div>
+                        </div>
+                        <button id="btn-toggle-scan" class="btn btn-primary">🔍 Запустити сканування</button>
+                    </div>
+                </div>
+
+                <!-- Scanning Progress Indicator -->
+                <div class="card progress-card hidden" id="scan-progress-card">
+                    <div class="progress-info">
+                        <span class="progress-status" id="scan-status-text">Сканування дисків...</span>
+                        <span class="progress-stats" id="scan-stats-text">Файлів: 0 | Об'єм: 0 B</span>
+                    </div>
+                    <div class="progress-bar-container">
+                        <div class="progress-bar-fill indeterminate" id="scan-progress-fill"></div>
+                    </div>
+                </div>
+
+                <!-- Scan Results Panel -->
+                <div class="scan-results-container hidden" id="scan-results-container">
+                    <!-- Stats Header -->
+                    <div class="stats-grid">
+                        <div class="card stat-card">
+                            <div class="stat-icon yellow">📂</div>
+                            <div class="stat-info">
+                                <span class="stat-label">Проскановано</span>
+                                <h3 class="stat-value" id="stat-total-size">0.00 GB</h3>
+                                <span class="stat-desc" id="stat-file-count">0 файлів</span>
+                            </div>
+                        </div>
+
+                        <div class="card stat-card">
+                            <div class="stat-icon red">🧹</div>
+                            <div class="stat-info">
+                                <span class="stat-label">Рекомендовано очистити</span>
+                                <h3 class="stat-value" id="stat-flagged-size">0.00 MB</h3>
+                                <span class="stat-desc" id="stat-flagged-count">0 файлів за правилами</span>
+                            </div>
+                        </div>
+
+                        <div class="card stat-card score-card">
+                            <div class="score-ring-container">
+                                <svg class="score-ring" viewBox="0 0 36 36">
+                                    <path class="ring-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                                    <path class="ring-fill" id="health-ring-fill" stroke-dasharray="100, 100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                                </svg>
+                                <div class="score-text" id="health-score-val">100</div>
+                            </div>
+                            <div class="stat-info">
+                                <span class="stat-label">Індекс здоров'я диска</span>
+                                <span class="stat-desc green-text" id="health-score-desc">Відмінно</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Main Dashboard Split Content -->
+                    <div class="results-main-split">
+                        <!-- Left Side: AI Recommendations & SRE DevOps Logs -->
+                        <div class="results-left-pane">
+                            <div class="card ai-card">
+                                <div class="ai-card-header">
+                                    <div class="ai-title-row">
+                                        <span class="ai-robot-icon">🤖</span>
+                                        <h3>Рекомендації ШІ</h3>
+                                    </div>
+                                    <div class="ai-action-buttons">
+                                        <button id="btn-generate-ai" class="btn btn-primary">Згенерувати рекомендації ШІ</button>
+                                        <button id="btn-bulk-delete-ai" class="btn btn-danger hidden">🧹 Видалити рекомендоване ШІ</button>
+                                    </div>
+                                </div>
+                                <div class="ai-chat-browser" id="ai-chat-browser">
+                                    <p class="placeholder-text">Натисніть "Згенерувати рекомендації ШІ", щоб штучний інтелект проаналізував знайдені файли.</p>
+                                </div>
+                            </div>
+
+                            <!-- DevOps SRE Info Card -->
+                            <div class="card sre-card hidden" id="devops-sre-card">
+                                <h3>📊 DevOps SRE Аналітика (Docker)</h3>
+                                <div class="sre-section">
+                                    <h4>Контейнери Docker (Write-Layers)</h4>
+                                    <div class="table-container">
+                                        <table class="data-table" id="table-sre-containers">
+                                            <thead>
+                                                <tr>
+                                                    <th>Назва</th>
+                                                    <th>Образ</th>
+                                                    <th>Write Layer Size</th>
+                                                    <th>Virtual Size</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                <!-- Dynamic rows -->
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+
+                                <div class="sre-section margin-top">
+                                    <h4>Томи Docker (Volumes)</h4>
+                                    <div class="table-container">
+                                        <table class="data-table" id="table-sre-volumes">
+                                            <thead>
+                                                <tr>
+                                                    <th>Назва</th>
+                                                    <th>Об'єм</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                <!-- Dynamic rows -->
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Windows Crash Dumps SRE Info Card -->
+                            <div class="card sre-card hidden" id="windows-sre-card">
+                                <h3>⚙️ Стан системних каталогів Windows</h3>
+                                <div class="table-container">
+                                    <table class="data-table" id="table-sre-windows">
+                                        <thead>
+                                            <tr>
+                                                <th>Каталог</th>
+                                                <th>Шлях</th>
+                                                <th>Файлів</th>
+                                                <th>Об'єм</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <!-- Dynamic rows -->
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Right Side: Categorized Files Accordion -->
+                        <div class="results-right-pane">
+                            <!-- Accordion Selector Tabs -->
+                            <div class="accordion-header-tabs">
+                                <button class="accordion-tab active" data-target="pane-large">Великі (>100MB)</button>
+                                <button class="accordion-tab" data-target="pane-temp">Тимчасові</button>
+                                <button class="accordion-tab" data-target="pane-logs">Логи</button>
+                                <button class="accordion-tab" data-target="pane-duplicates">Дублікати</button>
+                            </div>
+
+                            <!-- Accordion View Panels -->
+                            <div class="accordion-content-card card">
+                                <!-- Large Files Panel -->
+                                <div class="accordion-panel active" id="pane-large">
+                                    <div class="table-container">
+                                        <table class="data-table" id="table-large-files">
+                                            <thead>
+                                                <tr>
+                                                    <th>Файл</th>
+                                                    <th>Розмір</th>
+                                                    <th>Причина (Правило)</th>
+                                                    <th class="col-action">Дія</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody></tbody>
+                                        </table>
+                                    </div>
+                                </div>
+
+                                <!-- Temp Files Panel -->
+                                <div class="accordion-panel" id="pane-temp">
+                                    <div class="table-container">
+                                        <table class="data-table" id="table-temp-files">
+                                            <thead>
+                                                <tr>
+                                                    <th>Файл</th>
+                                                    <th>Розмір</th>
+                                                    <th>Причина (Правило)</th>
+                                                    <th class="col-action">Дія</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody></tbody>
+                                        </table>
+                                    </div>
+                                </div>
+
+                                <!-- Logs Files Panel -->
+                                <div class="accordion-panel" id="pane-logs">
+                                    <div class="table-container">
+                                        <table class="data-table" id="table-log-files">
+                                            <thead>
+                                                <tr>
+                                                    <th>Файл</th>
+                                                    <th>Розмір</th>
+                                                    <th>Причина (Правило)</th>
+                                                    <th class="col-action">Дія</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody></tbody>
+                                        </table>
+                                    </div>
+                                </div>
+
+                                <!-- Duplicates Panel -->
+                                <div class="accordion-panel" id="pane-duplicates">
+                                    <div id="duplicates-group-container" class="duplicates-container">
+                                        <!-- Dynamic duplicate groups -->
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 2. Settings Tab -->
+            <section class="tab-content hidden" id="tab-settings">
+                <div class="settings-layout">
+                    <!-- Left Mini Sub-sidebar -->
+                    <div class="card settings-sub-sidebar">
+                        <ul class="sub-nav-list">
+                            <li class="sub-nav-item active" data-form="form-ai-providers">🤖 AI Провайдери</li>
+                            <li class="sub-nav-item" data-form="form-scan-rules">📋 Правила сканування</li>
+                            <li class="sub-nav-item" data-form="form-remote-hosts">🖥️ Віддалені хости</li>
+                        </ul>
+                    </div>
+
+                    <!-- Right Configuration Forms -->
+                    <div class="card settings-forms-pane">
+                        <!-- Form 1: AI Providers -->
+                        <div class="settings-form-block active" id="form-ai-providers">
+                            <h3>Налаштування AI провайдерів</h3>
+                            <p class="settings-desc">Виберіть та налаштуйте модель ШІ для аналізу стану дисків:</p>
+                            
+                            <div class="form-group margin-top">
+                                <label for="select-ai-provider-type">Виберіть провайдера ШІ:</label>
+                                <select id="select-ai-provider-type" class="form-select">
+                                    <option value="ollama">Ollama (Локально)</option>
+                                    <option value="lmstudio">LM Studio (Локально)</option>
+                                    <option value="openai">OpenAI API</option>
+                                    <option value="gemini">Gemini API</option>
+                                    <option value="anthropic">Anthropic Claude API</option>
+                                    <option value="deepseek">DeepSeek API</option>
+                                    <option value="custom">Custom API Proxy (Сумісна з OpenAI)</option>
+                                </select>
+                            </div>
+
+                            <div class="form-grid-2">
+                                <div class="form-group" id="ai-group-url">
+                                    <label for="input-ai-url">Base URL:</label>
+                                    <input type="text" id="input-ai-url" class="form-input">
+                                </div>
+                                <div class="form-group" id="ai-group-key">
+                                    <label for="input-ai-key">Ключ API:</label>
+                                    <input type="password" id="input-ai-key" class="form-input">
+                                </div>
+                            </div>
+
+                            <div class="form-grid-2">
+                                <div class="form-group">
+                                    <label for="select-ai-model">Модель:</label>
+                                    <div class="model-picker-wrapper">
+                                        <select id="select-ai-model" class="form-select"></select>
+                                        <button id="btn-fetch-models" class="btn btn-secondary">🔄 Отримати список</button>
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <label for="input-ai-temp">Температура (Креативність):</label>
+                                    <input type="number" id="input-ai-temp" class="form-input" min="0" max="1" step="0.1" value="0.7">
+                                </div>
+                            </div>
+
+                            <div class="settings-actions-row">
+                                <button id="btn-test-ai" class="btn btn-secondary">⚡ Тестувати з'єднання</button>
+                                <button id="btn-save-ai" class="btn btn-primary">💾 Зберегти налаштування</button>
+                            </div>
+                        </div>
+
+                        <!-- Form 2: Scan Rules -->
+                        <div class="settings-form-block" id="form-scan-rules">
+                            <h3>Правила автоматичного виявлення</h3>
+                            <p class="settings-desc">Налаштуйте фільтри, які позначають файли для потенційного очищення:</p>
+                            
+                            <div class="rules-editor-list margin-top">
+                                <div class="rule-edit-card">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="chk-rule-temp" checked>
+                                        <span>Тимчасові файли (Temp) застарілість більше ніж (днів):</span>
+                                    </label>
+                                    <input type="number" id="val-rule-temp" class="form-input tiny" value="30">
+                                </div>
+
+                                <div class="rule-edit-card">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="chk-rule-log-size" checked>
+                                        <span>Файли логів (Logs) об'ємом більше ніж (MB):</span>
+                                    </label>
+                                    <input type="number" id="val-rule-log-size" class="form-input tiny" value="100">
+                                </div>
+
+                                <div class="rule-edit-card">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="chk-rule-log-old" checked>
+                                        <span>Файли логів (Logs) застарілість більше ніж (днів):</span>
+                                    </label>
+                                    <input type="number" id="val-rule-log-old" class="form-input tiny" value="14">
+                                </div>
+
+                                <div class="rule-edit-card">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="chk-rule-backup" checked>
+                                        <span>Файли резервних копій (Backups) застарілість більше ніж (днів):</span>
+                                    </label>
+                                    <input type="number" id="val-rule-backup" class="form-input tiny" value="90">
+                                </div>
+
+                                <div class="rule-edit-card">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="chk-rule-large">
+                                        <span>Некатегоризовані файли розміром більше ніж (MB):</span>
+                                    </label>
+                                    <input type="number" id="val-rule-large" class="form-input tiny" value="1024">
+                                </div>
+                            </div>
+
+                            <div class="settings-actions-row">
+                                <button id="btn-save-rules" class="btn btn-primary">💾 Зберегти правила</button>
+                            </div>
+                        </div>
+
+                        <!-- Form 3: Remote Hosts (SSH Hosts) -->
+                        <div class="settings-form-block" id="form-remote-hosts">
+                            <div class="hosts-header">
+                                <h3>Захищені віддалені сервери (SSH)</h3>
+                                <button id="btn-add-ssh" class="btn btn-primary">➕ Додати SSH сервер</button>
+                            </div>
+                            <p class="settings-desc">Тут ви можете зберегти реквізити для автоматичного SRE-сканування серверів:</p>
+                            
+                            <div class="table-container margin-top">
+                                <table class="data-table" id="table-ssh-hosts">
+                                    <thead>
+                                        <tr>
+                                            <th>Назва</th>
+                                            <th>Адреса (Host)</th>
+                                            <th>Порт</th>
+                                            <th>Користувач</th>
+                                            <th>Авторизація</th>
+                                            <th class="col-action-wide">Дії</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <!-- Dynamic rows -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- MODAL 1: Confirm Deletion Dialogue -->
+    <div class="modal-overlay hidden" id="modal-delete-confirm">
+        <div class="modal-card">
+            <h3 class="modal-title text-danger">Підтвердження очищення дисків</h3>
+            
+            <div class="modal-body">
+                <div class="delete-summary-box">
+                    <p>Кількість файлів для видалення: <strong id="delete-files-count">0</strong></p>
+                    <p>Сумарно дискового простору звільниться: <strong id="delete-files-size" class="text-danger">0.00 B</strong></p>
+                </div>
+
+                <div class="restricted-warnings hidden" id="delete-restricted-box">
+                    <p class="warning-text">⚠️ <strong><span id="delete-restricted-count">0</span> файл(ів)</strong> є захищеними системою або заблокованими, їх не буде видалено.</p>
+                </div>
+
+                <div class="form-group margin-top">
+                    <label class="checkbox-label bold">
+                        <input type="checkbox" id="chk-recycle-bin" checked>
+                        <span>Перемістити файли в Кошик (Рекомендовано)</span>
+                    </label>
+                </div>
+
+                <!-- Delete Progress indicators -->
+                <div class="delete-progress-container hidden" id="delete-progress-block">
+                    <p class="progress-file" id="delete-progress-file-text">Видалення: file.txt</p>
+                    <div class="progress-bar-container">
+                        <div class="progress-bar-fill danger" id="delete-progress-fill" style="width: 0%;"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="modal-footer">
+                <button id="btn-delete-cancel" class="btn btn-secondary">Скасувати</button>
+                <button id="btn-delete-execute" class="btn btn-danger">Видалити</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL 2: Add/Edit SSH Host Dialogue -->
+    <div class="modal-overlay hidden" id="modal-ssh-editor">
+        <div class="modal-card">
+            <h3 class="modal-title" id="ssh-modal-title">Додати SSH хост</h3>
+            
+            <div class="modal-body">
+                <input type="hidden" id="input-ssh-id">
+                
+                <div class="form-group">
+                    <label for="input-ssh-name">Назва підключення:</label>
+                    <input type="text" id="input-ssh-name" placeholder="напр. Мій VPS" class="form-input">
+                </div>
+
+                <div class="form-grid-2">
+                    <div class="form-group">
+                        <label for="input-ssh-editor-host">IP / Хост:</label>
+                        <input type="text" id="input-ssh-editor-host" placeholder="192.168.1.100" class="form-input">
+                    </div>
+                    <div class="form-group">
+                        <label for="input-ssh-editor-port">Порт:</label>
+                        <input type="number" id="input-ssh-editor-port" value="22" class="form-input">
+                    </div>
+                </div>
+
+                <div class="form-grid-2">
+                    <div class="form-group">
+                        <label for="input-ssh-editor-user">Користувач:</label>
+                        <input type="text" id="input-ssh-editor-user" placeholder="root" class="form-input">
+                    </div>
+                    <div class="form-group">
+                        <label for="select-ssh-editor-auth">Метод авторизації:</label>
+                        <select id="select-ssh-editor-auth" class="form-select">
+                            <option value="password">Пароль</option>
+                            <option value="key">Приватний ключ (Файл)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="input-ssh-editor-cred" id="lbl-ssh-editor-cred">Пароль віддаленого сервера:</label>
+                    <input type="text" id="input-ssh-editor-cred" placeholder="Введіть пароль або шлях до id_rsa" class="form-input">
+                </div>
+            </div>
+
+            <div class="modal-footer">
+                <button id="btn-ssh-cancel" class="btn btn-secondary">Скасувати</button>
+                <button id="btn-ssh-save" class="btn btn-primary">Зберегти хост</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="./src/main.js" type="module"></script>
+</body>
+</html>

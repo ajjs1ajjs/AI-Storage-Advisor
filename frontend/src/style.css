@@ -1,0 +1,5 @@
+/* System reset stylesheet - core styling is moved to app.css */
+body {
+    margin: 0;
+    padding: 0;
+}

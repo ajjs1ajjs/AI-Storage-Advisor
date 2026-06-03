@@ -1,0 +1,13 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "aisadvisor",
+  "outputfilename": "aisadvisor",
+  "frontend:install": "npm install",
+  "frontend:build": "npm run build",
+  "frontend:dev:watcher": "npm run dev",
+  "frontend:dev:serverUrl": "auto",
+  "author": {
+    "name": "ajjs1ajjs",
+    "email": "ajjs1ajjs@users.noreply.github.com"
+  }
+}

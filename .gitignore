@@ -1,18 +1,10 @@
-# Portable app data (contains SQLite database with encrypted credentials, session vaults, and logs)
+# Wails build output & frontend dependencies
+build/bin/
+node_modules/
+frontend/dist/
+
+# Local databases and logs
 data/
-
-# PyInstaller build directories
-build/
-dist/
-*.spec
-
-# Python caches
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-
-# Local virtual environment
-.venv/
-venv/
-ENV/
+*.db
+*.enc
+*.log

@@ -1,0 +1,315 @@
+package scanner
+
+import (
+	"context"
+	"crypto/md5"
+	"encoding/hex"
+	"fmt"
+	"io"
+	"log"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"aisadvisor/backend/rules"
+	"aisadvisor/backend/sre"
+)
+
+type FileInfo struct {
+	Path           string  `json:"path"`
+	Name           string  `json:"name"`
+	Size           int64   `json:"size"`
+	SizeFormatted  string  `json:"size_formatted"`
+	Ext            string  `json:"ext"`
+	LastAccess     string  `json:"last_access"`
+	LastModified   string  `json:"last_modified"`
+	LastModifiedTS int64   `json:"last_modified_ts"`
+	Category       string  `json:"category"`
+	RuleMatch      *string `json:"rule_match"`
+}
+
+type DuplicateFileInfo struct {
+	Path          string `json:"path"`
+	Size          int64  `json:"size"`
+	SizeFormatted string `json:"size_formatted"`
+}
+
+type ScanResults struct {
+	TotalSize           int64                            `json:"total_size"`
+	TotalSizeFormatted  string                           `json:"total_size_formatted"`
+	FilesScanned        int                              `json:"files_scanned"`
+	LargeFiles          []FileInfo                       `json:"large_files"`
+	TempFiles           []FileInfo                       `json:"temp_files"`
+	LogFiles            []FileInfo                       `json:"log_files"`
+	BackupFiles         []FileInfo                       `json:"backup_files"`
+	CacheFiles          []FileInfo                       `json:"cache_files"`
+	DuplicateGroups     map[string][]DuplicateFileInfo   `json:"duplicate_groups"`
+	SreData             sre.SreReport                    `json:"sre_data"`
+	RulesFlaggedCount   int                              `json:"rules_flagged_count"`
+	RulesFlaggedSize    int64                            `json:"rules_flagged_size"`
+	Cancelled           bool                             `json:"cancelled"`
+}
+
+func FormatSize(sizeBytes int64) string {
+	units := []string{"B", "KB", "MB", "GB", "TB"}
+	val := float64(sizeBytes)
+	for _, unit := range units {
+		if val < 1024.0 {
+			return fmt.Sprintf("%.2f %s", val, unit)
+		}
+		val /= 1024.0
+	}
+	return fmt.Sprintf("%.2f PB", val)
+}
+
+func ScanLocalDisk(ctx context.Context, startPath string, activeRules []rules.Rule, progressCallback func(currentDir string, filesScanned int, totalSize int64)) (ScanResults, error) {
+	log.Printf("Starting local scan on: %s", startPath)
+
+	var filesScanned int
+	var totalSize int64
+
+	largeFiles := make([]FileInfo, 0)
+	tempFiles := make([]FileInfo, 0)
+	logFiles := make([]FileInfo, 0)
+	backupFiles := make([]FileInfo, 0)
+	cacheFiles := make([]FileInfo, 0)
+
+	sizeGroups := make(map[int64][]string)
+
+	tempDirs := []string{"temp", "tmp", "cache", "logs", "log"}
+	lastEmitTime := time.Now()
+
+	err := filepath.WalkDir(startPath, func(path string, d os.DirEntry, err error) error {
+		// Handle cancellation
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		if err != nil {
+			// Skip directories/files with access denied errors
+			return filepath.SkipDir
+		}
+
+		if d.IsDir() {
+			nameLower := strings.ToLower(d.Name())
+			// Skip junctions, common system folders, and heavy developer dependencies
+			if nameLower == "$recycle.bin" || nameLower == "system volume information" ||
+				nameLower == ".git" || nameLower == "node_modules" ||
+				nameLower == ".venv" || nameLower == "venv" ||
+				nameLower == "__pycache__" || nameLower == ".idea" || nameLower == ".vscode" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		// Progress reporting (throttled to max 10/sec)
+		filesScanned++
+		info, err := d.Info()
+		if err != nil {
+			return nil
+		}
+		size := info.Size()
+		totalSize += size
+
+		if time.Since(lastEmitTime) > 100*time.Millisecond {
+			progressCallback(filepath.Dir(path), filesScanned, totalSize)
+			lastEmitTime = time.Now()
+		}
+
+		ext := strings.ToLower(filepath.Ext(path))
+		name := d.Name()
+		nameLower := strings.ToLower(name)
+		pathLower := strings.ToLower(path)
+
+		lastAccess := info.ModTime().Format("2006-01-02 15:04:05") // ModTime is closest safe fallback for access
+		lastModified := info.ModTime().Format("2006-01-02 15:04:05")
+		lastModifiedTS := info.ModTime().Unix()
+
+		fileInfo := FileInfo{
+			Path:           path,
+			Name:           name,
+			Size:           size,
+			SizeFormatted:  FormatSize(size),
+			Ext:            ext,
+			LastAccess:     lastAccess,
+			LastModified:   lastModified,
+			LastModifiedTS: lastModifiedTS,
+			Category:       "other",
+		}
+
+		// Categorization
+		isTempDir := false
+		for _, td := range tempDirs {
+			if strings.Contains(pathLower, td) {
+				isTempDir = true
+				break
+			}
+		}
+
+		isTempExt := ext == ".tmp" || ext == ".temp" || ext == ".bak" || ext == ".old"
+
+		if isTempExt || isTempDir {
+			if (ext == ".log" || ext == ".txt") && strings.Contains(pathLower, "log") {
+				fileInfo.Category = "log"
+				logFiles = append(logFiles, fileInfo)
+			} else if strings.Contains(pathLower, "cache") {
+				fileInfo.Category = "cache"
+				cacheFiles = append(cacheFiles, fileInfo)
+			} else {
+				fileInfo.Category = "temp"
+				tempFiles = append(tempFiles, fileInfo)
+			}
+		} else if ext == ".log" || (ext == ".txt" && strings.Contains(nameLower, "log")) {
+			fileInfo.Category = "log"
+			logFiles = append(logFiles, fileInfo)
+		} else if (ext == ".zip" || ext == ".rar" || ext == ".tar" || ext == ".gz" || ext == ".7z" || ext == ".bak") &&
+			(strings.Contains(nameLower, "backup") || strings.Contains(nameLower, "bak")) {
+			fileInfo.Category = "backup"
+			backupFiles = append(backupFiles, fileInfo)
+		}
+
+		// Large files
+		if size > 100*1024*1024 {
+			if fileInfo.Category == "other" {
+				fileInfo.Category = "large"
+			}
+			largeFiles = append(largeFiles, fileInfo)
+		}
+
+		// Group for duplicates
+		if size > 1*1024*1024 { // Only files > 1 MB
+			sizeGroups[size] = append(sizeGroups[size], path)
+		}
+
+		return nil
+	})
+
+	if err != nil && err != context.Canceled {
+		return ScanResults{}, err
+	}
+
+	if ctx.Err() == context.Canceled {
+		return ScanResults{Cancelled: true}, nil
+	}
+
+	// Duplicates matching: prefix hash -> full hash
+	duplicateGroups := make(map[string][]DuplicateFileInfo)
+	for size, paths := range sizeGroups {
+		select {
+		case <-ctx.Done():
+			return ScanResults{Cancelled: true}, nil
+		default:
+		}
+
+		if len(paths) > 1 {
+			// Group by prefix hash
+			prefixGroups := make(map[string][]string)
+			for _, p := range paths {
+				h, err := getPrefixHash(p)
+				if err != nil {
+					continue
+				}
+				prefixGroups[h] = append(prefixGroups[h], p)
+			}
+
+			// Group by full hash
+			for _, collidingPaths := range prefixGroups {
+				if len(collidingPaths) > 1 {
+					fullGroups := make(map[string][]string)
+					for _, p := range collidingPaths {
+						h, err := getFullHash(ctx, p)
+						if err != nil {
+							continue
+						}
+						fullGroups[h] = append(fullGroups[h], p)
+					}
+
+					for h, dupPaths := range fullGroups {
+						if len(dupPaths) > 1 {
+							dups := make([]DuplicateFileInfo, 0)
+							for _, p := range dupPaths {
+								dups = append(dups, DuplicateFileInfo{
+									Path:          p,
+									Size:          size,
+									SizeFormatted: FormatSize(size),
+								})
+							}
+							duplicateGroups[h] = dups
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Calculate SRE data (Windows)
+	sreData := sre.AnalyzeWindowsSystem()
+
+	results := ScanResults{
+		TotalSize:          totalSize,
+		TotalSizeFormatted: FormatSize(totalSize),
+		FilesScanned:       filesScanned,
+		LargeFiles:         largeFiles,
+		TempFiles:          tempFiles,
+		LogFiles:           logFiles,
+		BackupFiles:        backupFiles,
+		CacheFiles:         cacheFiles,
+		DuplicateGroups:    duplicateGroups,
+		SreData:            sreData,
+	}
+
+	// Apply rules engine logic to flag files
+	results = rules.ProcessRules(results, activeRules)
+
+	return results, nil
+}
+
+func getPrefixHash(filePath string) (string, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	buf := make([]byte, 4096)
+	n, err := file.Read(buf)
+	if err != nil && err != io.EOF {
+		return "", err
+	}
+
+	h := md5.Sum(buf[:n])
+	return hex.EncodeToString(h[:]), nil
+}
+
+func getFullHash(ctx context.Context, filePath string) (string, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	h := md5.New()
+	buf := make([]byte, 65536)
+	for {
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		default:
+		}
+
+		n, err := file.Read(buf)
+		if n > 0 {
+			h.Write(buf[:n])
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return "", err
+		}
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
