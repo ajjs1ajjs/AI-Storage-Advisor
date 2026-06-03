@@ -8,6 +8,7 @@ import (
 	"fmt"
 
 	"aisadvisor/backend/cleanup"
+	"aisadvisor/backend/config"
 	"aisadvisor/backend/db"
 	"aisadvisor/backend/forecast"
 	"aisadvisor/backend/providers"
@@ -40,6 +41,7 @@ func NewApp() *App {
 // so we can call the runtime methods
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	config.InitConfig()
 	security.InitVault()
 	db.InitDB()
 }
