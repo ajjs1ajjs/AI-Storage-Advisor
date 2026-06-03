@@ -92,7 +92,10 @@
                 <!-- Scanning Progress Indicator -->
                 <div class="card progress-card hidden" id="scan-progress-card">
                     <div class="progress-info">
-                        <span class="progress-status" id="scan-status-text">Сканування дисків...</span>
+                        <div class="progress-status-wrapper">
+                            <div class="scanner-spinner"></div>
+                            <span class="progress-status" id="scan-status-text">Сканування дисків...</span>
+                        </div>
                         <span class="progress-stats" id="scan-stats-text">Файлів: 0 | Об'єм: 0 B</span>
                     </div>
                     <div class="progress-bar-container">
