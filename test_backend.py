@@ -396,5 +396,49 @@ class TestAIStorageAdvisorBackend(unittest.TestCase):
 
         print("    - SRE size parser, health score deductions, and warnings mapping OK.")
 
+    def test_10_dashboard_markdown_parsing(self):
+        print("\n[+] Testing Dashboard markdown preprocessing and cleanup parsing...")
+        import re
+        import urllib.parse
+        
+        # Simulated raw LLM output text
+        raw_text = (
+            "Recommended for deletion:\n"
+            "* D:\\OneDriveTemp\\{03C0983D}.vhdx (199.00 MB) - [Видалити](delete://D:\\OneDriveTemp\\{03C0983D}.vhdx)\n"
+            "* D:\\SteamLibrary\\steamapps\\common\\World of Tanks\\ru\\python.log (1.65 MB) - [Видалити](delete://D:\\SteamLibrary\\steamapps\\common\\World of Tanks\\ru\\python.log)\n"
+            "\nWARNING: DO NOT DELETE:\n"
+            "* D:\\GAME\\Forza Horizon 6\\media\\Tracks\\Brio\\GeoChunk2.minizip (46.02 GB)\n"
+        )
+        
+        # Test formatting / preprocessing
+        def fix_delete_link(match):
+            display_text = match.group(1)
+            raw_path = match.group(2)
+            normalized_path = raw_path.replace("\\", "/")
+            encoded_path = urllib.parse.quote(normalized_path, safe=":/")
+            return f"[{display_text}](delete://{encoded_path})"
+            
+        processed_text = re.sub(r'\[([^\]]+)\]\(delete://([^\)]+)\)', fix_delete_link, raw_text)
+        
+        # Check that backslashes are forward-slashed and spaces/brackets are properly encoded
+        self.assertIn("delete://D:/OneDriveTemp/%7B03C0983D%7D.vhdx", processed_text)
+        self.assertIn("delete://D:/SteamLibrary/steamapps/common/World%20of%20Tanks/ru/python.log", processed_text)
+        
+        # Test parsing link for cleanup
+        links = re.findall(r'delete://([^\)]+)', processed_text)
+        
+        file_paths = []
+        for raw_path in links:
+            decoded_path = urllib.parse.unquote(raw_path)
+            normalized_path = os.path.normpath(decoded_path)
+            file_paths.append(normalized_path)
+            
+        unique_file_paths = list(dict.fromkeys(file_paths))
+        
+        self.assertEqual(len(unique_file_paths), 2)
+        self.assertEqual(unique_file_paths[0], os.path.normpath("D:\\OneDriveTemp\\{03C0983D}.vhdx"))
+        self.assertEqual(unique_file_paths[1], os.path.normpath("D:\\SteamLibrary\\steamapps\\common\\World of Tanks\\ru\\python.log"))
+        print("    - Link normalization, URL-encoding, and file path retrieval OK.")
+
 if __name__ == "__main__":
     unittest.main()

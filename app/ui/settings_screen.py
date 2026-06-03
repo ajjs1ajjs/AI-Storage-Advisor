@@ -11,7 +11,7 @@ from PySide6.QtGui import QFont
 from app.database.db_manager import db
 from app.security.vault import vault
 from app.providers.local_providers import OllamaProvider, LMStudioProvider
-from app.providers.api_providers import OpenAIAPIProvider, AnthropicAPIProvider, GeminiAPIProvider, DeepSeekAPIProvider
+from app.providers.api_providers import OpenAIAPIProvider, AnthropicAPIProvider, GeminiAPIProvider, DeepSeekAPIProvider, CustomAPIProvider
 from app.ui.components.ssh_host_dialog import SSHHostDialog
 from app.modules.rules_engine import RulesEngine
 from app.core.config import logger
@@ -44,6 +44,7 @@ class SettingsScreen(QWidget):
         self.profile_id = None
         self.current_setting_name = None
         self.hosts_table = None
+        self.model_list_cache = {}
         self.init_ui()
 
     def set_profile(self, profile_id: int):
@@ -71,8 +72,8 @@ class SettingsScreen(QWidget):
         left_layout.addWidget(self.setting_list)
 
         self.setting_names = [
-            "Ollama", "LM Studio", 
-            "OpenAI API", "Anthropic API", "Gemini API", "DeepSeek API",
+            "Ollama", "LM Studio",
+            "OpenAI API", "Anthropic API", "Gemini API", "DeepSeek API", "Custom API",
             "📋 Scan Rules", "🖥️ Remote Hosts"
         ]
         for name in self.setting_names:
@@ -124,6 +125,7 @@ class SettingsScreen(QWidget):
         for i in reversed(range(self.form_layout.count())):
             widget = self.form_layout.itemAt(i).widget()
             if widget is not None:
+                widget.setParent(None)
                 widget.deleteLater()
 
     def render_form(self, name: str):
@@ -198,11 +200,15 @@ class SettingsScreen(QWidget):
             if name in ("Ollama", "LM Studio"):
                 self.add_field("base_url", "Base URL:", "http://localhost:11434" if name == "Ollama" else "http://localhost:1234/v1")
                 
-                models = ["llama3", "llama3:8b", "mistral", "gemma", "phi3", "codellama"] if name == "Ollama" else \
+                models = [] if name == "Ollama" else \
                          ["meta-llama-3-8b-instruct", "phi-3-mini-4k-instruct", "local-model"]
-                default_model = "llama3" if name == "Ollama" else "meta-llama-3-8b-instruct"
+                default_model = "" if name == "Ollama" else "meta-llama-3-8b-instruct"
                 self.add_dropdown_field("model", "Model Name:", models, default_model, has_fetch_btn=True)
-                self.add_field("temperature", "Temperature (0.0 to 1.0):", "0.7")
+
+            elif name == "Custom API":
+                self.add_field("base_url", "Base URL:", "https://api.openai.com/v1")
+                self.add_field("api_key", "API Key:", "", is_password=True)
+                self.add_field("model", "Model Name:", "gpt-4")
 
             elif name in ("OpenAI API", "Anthropic API", "Gemini API", "DeepSeek API"):
                 self.add_field("api_key", "API Key:", "", is_password=True)
@@ -220,7 +226,6 @@ class SettingsScreen(QWidget):
                     models = ["deepseek-v4-flash", "deepseek-v4-pro"]
 
                 self.add_dropdown_field("model", "Model Name:", models, default_model, has_fetch_btn=True)
-                self.add_field("temperature", "Temperature:", "0.7")
 
 
 
@@ -293,6 +298,8 @@ class SettingsScreen(QWidget):
             provider = GeminiAPIProvider(config)
         elif name == "DeepSeek API":
             provider = DeepSeekAPIProvider(config)
+        elif name == "Custom API":
+            provider = CustomAPIProvider(config)
             
         if not provider:
             return
@@ -318,25 +325,36 @@ class SettingsScreen(QWidget):
             combo = self.form_widget.findChild(QComboBox, "model")
             if combo:
                 current_text = combo.currentText().strip()
-                combo.clear()
-                combo.addItems(models)
-                
-                # Try to restore the previous selection
-                if current_text:
-                    if current_text not in models:
-                        combo.addItem(current_text)
-                    idx = combo.findText(current_text)
-                    if idx >= 0:
-                        combo.setCurrentIndex(idx)
-                    else:
-                        combo.setCurrentText(current_text)
-                elif models:
-                    combo.setCurrentIndex(0)
-                    
-                QMessageBox.information(self, "Success", f"Successfully loaded {len(models)} models from provider!")
-                
+                selected_text = current_text if current_text in models else ""
+                self._replace_combo_items(combo, models, selected_text)
+                self.model_list_cache.setdefault(name, {})["model"] = [
+                    combo.itemText(i) for i in range(combo.count())
+                ]
+
+                saved = self.save_configuration(silent=True)
+                if saved:
+                    QMessageBox.information(self, "Success", f"Successfully loaded and saved {len(models)} models from provider!")
+                else:
+                    QMessageBox.warning(self, "Loaded but not saved", f"Successfully loaded {len(models)} models, but failed to save them. Please click Save Configuration manually.")
+
         self.fetch_worker.finished.connect(on_fetch_finished)
         self.fetch_worker.start()
+
+    def _replace_combo_items(self, combo: QComboBox, items: list[str], selected_text: str = ""):
+        selected_text = selected_text.strip()
+        combo.clear()
+        combo.addItems(items)
+
+        if selected_text:
+            if selected_text not in items:
+                combo.addItem(selected_text)
+            idx = combo.findText(selected_text)
+            if idx >= 0:
+                combo.setCurrentIndex(idx)
+            else:
+                combo.setCurrentText(selected_text)
+        elif items:
+            combo.setCurrentIndex(0)
 
     def add_rule_fields(self, rule_id: str, label_text: str, default_value: str):
         row = QWidget()
@@ -392,7 +410,8 @@ class SettingsScreen(QWidget):
                     return
 
                 cursor.execute(
-                    "SELECT config_json FROM ai_providers WHERE profile_id = ? AND name = ?",
+                    "SELECT config_json FROM ai_providers WHERE profile_id = ? AND name = ? "
+                    "ORDER BY is_selected DESC, id DESC LIMIT 1",
                     (self.profile_id, name)
                 )
                 row = cursor.fetchone()
@@ -400,35 +419,42 @@ class SettingsScreen(QWidget):
                     config_encrypted = row["config_json"]
                     config_json = vault.decrypt(config_encrypted)
                     config = json.loads(config_json)
-                    
+
                     # First pass: restore combo item lists (from fetched models)
                     for k, v in config.items():
                         if k.endswith('_list') and isinstance(v, list):
                             combo_name = k[:-5]  # strip '_list' suffix
                             combo = self.form_widget.findChild(QComboBox, combo_name)
                             if combo:
-                                combo.clear()
-                                combo.addItems(v)
+                                self._replace_combo_items(combo, v, combo.currentText())
 
                     # Second pass: restore values (check QComboBox BEFORE QLineEdit
                     # because editable QComboBox contains an internal QLineEdit)
                     for k, v in config.items():
                         if k.endswith('_list'):
                             continue
+                        v_str = str(v)
+                        if not v_str:
+                            continue
                         # Try QComboBox first
                         combo = self.form_widget.findChild(QComboBox, k)
                         if combo:
-                            idx = combo.findText(str(v))
+                            idx = combo.findText(v_str)
                             if idx >= 0:
                                 combo.setCurrentIndex(idx)
                             else:
-                                combo.addItem(str(v))
-                                combo.setCurrentText(str(v))
+                                combo.addItem(v_str)
+                                combo.setCurrentText(v_str)
                             continue
                         # Then try QLineEdit
                         inp = self.form_widget.findChild(QLineEdit, k)
                         if inp:
-                            inp.setText(str(v))
+                            inp.setText(v_str)
+
+                for combo_name, items in self.model_list_cache.get(name, {}).items():
+                    combo = self.form_widget.findChild(QComboBox, combo_name)
+                    if combo and combo.count() == 0:
+                        self._replace_combo_items(combo, items, combo.currentText())
         except Exception as e:
             logger.error(f"Error loading setting data: {e}")
 
@@ -503,9 +529,9 @@ class SettingsScreen(QWidget):
             except Exception as e:
                 logger.error(f"Failed to delete SSH Host: {e}")
 
-    def save_configuration(self):
+    def save_configuration(self, silent: bool = False):
         if not self.current_setting_name:
-            return
+            return False
 
         try:
             if self.current_setting_name == "📋 Scan Rules":
@@ -530,8 +556,9 @@ class SettingsScreen(QWidget):
                         "ON CONFLICT(profile_id, setting_key) DO UPDATE SET setting_value = excluded.setting_value",
                         (self.profile_id, rules_json)
                     )
-                QMessageBox.information(self, "Success", "Scan rules configuration saved successfully!")
-                return
+                if not silent:
+                    QMessageBox.information(self, "Success", "Scan rules configuration saved successfully!")
+                return True
 
             # Save AI config
             config = {}
@@ -543,11 +570,16 @@ class SettingsScreen(QWidget):
                     config[inp.objectName()] = inp.text().strip()
             for combo in self.form_widget.findChildren(QComboBox):
                 if combo.objectName():
-                    config[combo.objectName()] = combo.currentText().strip()
-                    # Save the full list of items so we can restore fetched models later
+                    current_text = combo.currentText().strip()
+                    config[combo.objectName()] = current_text
+                    # Save the full list of items so we can restore fetched models later.
+                    # Editable combos do not always add typed/current text as an item.
                     items = [combo.itemText(i) for i in range(combo.count())]
+                    if current_text and current_text not in items:
+                        items.append(current_text)
                     if items:
                         config[f"{combo.objectName()}_list"] = items
+                        self.model_list_cache.setdefault(self.current_setting_name, {})[combo.objectName()] = items
 
             config_json = json.dumps(config)
             config_encrypted = vault.encrypt(config_json)
@@ -555,7 +587,8 @@ class SettingsScreen(QWidget):
             with db.connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    "SELECT id FROM ai_providers WHERE profile_id = ? AND name = ?",
+                    "SELECT id FROM ai_providers WHERE profile_id = ? AND name = ? "
+                    "ORDER BY is_selected DESC, id DESC LIMIT 1",
                     (self.profile_id, self.current_setting_name)
                 )
                 row = cursor.fetchone()
@@ -567,16 +600,24 @@ class SettingsScreen(QWidget):
                         "UPDATE ai_providers SET config_json = ?, is_selected = 1 WHERE id = ?",
                         (config_encrypted, row["id"])
                     )
+                    cursor.execute(
+                        "DELETE FROM ai_providers WHERE profile_id = ? AND name = ? AND id <> ?",
+                        (self.profile_id, self.current_setting_name, row["id"])
+                    )
                 else:
                     prov_type = "local" if self.current_setting_name in ("Ollama", "LM Studio") else "api"
                     cursor.execute(
                         "INSERT INTO ai_providers (profile_id, name, type, config_json, is_selected) VALUES (?, ?, ?, ?, 1)",
                         (self.profile_id, self.current_setting_name, prov_type, config_encrypted)
                     )
-            QMessageBox.information(self, "Success", f"Configuration for {self.current_setting_name} saved and set active!")
+            if not silent:
+                QMessageBox.information(self, "Success", f"Configuration for {self.current_setting_name} saved and set active!")
+            return True
         except Exception as e:
             logger.error(f"Save failed: {e}")
-            QMessageBox.critical(self, "Error", f"Failed to save: {e}")
+            if not silent:
+                QMessageBox.critical(self, "Error", f"Failed to save: {e}")
+            return False
 
     def test_connection(self):
         if not self.current_setting_name or self.current_setting_name in ("📋 Scan Rules", "🖥️ Remote Hosts"):

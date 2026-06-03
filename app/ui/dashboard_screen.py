@@ -17,7 +17,7 @@ from app.database.db_manager import db
 from app.security.vault import vault
 from app.providers.base import AIProvider
 from app.providers.local_providers import OllamaProvider, LMStudioProvider
-from app.providers.api_providers import OpenAIAPIProvider, AnthropicAPIProvider, GeminiAPIProvider, DeepSeekAPIProvider
+from app.providers.api_providers import OpenAIAPIProvider, AnthropicAPIProvider, GeminiAPIProvider, DeepSeekAPIProvider, CustomAPIProvider
 
 from app.core.config import logger
 
@@ -459,6 +459,8 @@ class DashboardScreen(QWidget):
                 return GeminiAPIProvider(config)
             elif prov_name == "DeepSeek API":
                 return DeepSeekAPIProvider(config)
+            elif prov_name == "Custom API":
+                return CustomAPIProvider(config)
 
             
         except Exception as e:
@@ -521,7 +523,24 @@ class DashboardScreen(QWidget):
         self.btn_ai_plan.setText("Згенерувати рекомендації ШІ")
         self.btn_ai_plan.setEnabled(True)
         self.status_lbl.setText("Рекомендації ШІ згенеровано.")
-        self.ai_browser.setMarkdown(text)
+        
+        # Preprocess the markdown to ensure all delete:// links are properly formatted for QTextBrowser
+        import re
+        import urllib.parse
+        
+        def fix_delete_link(match):
+            display_text = match.group(1)
+            raw_path = match.group(2)
+            # Replace backslashes with forward slashes
+            normalized_path = raw_path.replace("\\", "/")
+            # URL-encode the path, keeping ':' and '/' safe
+            encoded_path = urllib.parse.quote(normalized_path, safe=":/")
+            return f"[{display_text}](delete://{encoded_path})"
+            
+        processed_text = re.sub(r'\[([^\]]+)\]\(delete://([^\)]+)\)', fix_delete_link, text)
+        self.last_ai_recommendation = processed_text
+        
+        self.ai_browser.setMarkdown(processed_text)
         self.btn_ai_cleanup.setVisible(True)
 
     def on_ai_error(self, err_msg: str):
@@ -531,13 +550,36 @@ class DashboardScreen(QWidget):
         self.ai_browser.setHtml(f"<p style='color: #ef4444;'>Не вдалося отримати рекомендації: {err_msg}</p>")
 
     def cleanup_ai_recommended(self):
-        if not hasattr(self, "last_ai_files") or not self.last_ai_files:
+        if not hasattr(self, "last_ai_recommendation") or not self.last_ai_recommendation:
             return
             
-        file_paths = [f["path"] for f in self.last_ai_files]
+        import re
+        import urllib.parse
         
+        # Find all delete:// links inside the recommendation markdown
+        links = re.findall(r'delete://([^\)]+)', self.last_ai_recommendation)
+        
+        file_paths = []
+        for raw_path in links:
+            decoded_path = urllib.parse.unquote(raw_path)
+            normalized_path = os.path.normpath(decoded_path)
+            file_paths.append(normalized_path)
+            
+        # Deduplicate
+        unique_file_paths = []
+        for p in file_paths:
+            if p not in unique_file_paths:
+                unique_file_paths.append(p)
+                
+        if not unique_file_paths:
+            QMessageBox.information(
+                self, "Немає рекомендованих файлів",
+                "ШІ не запропонував жодного файлу для безпечного видалення."
+            )
+            return
+            
         # Open the CleanupDialog with these files
-        dialog = CleanupDialog(self.profile_id, file_paths, self)
+        dialog = CleanupDialog(self.profile_id, unique_file_paths, self)
         
         # Override recycle bin checks for remote hosts
         conn_type = self.combo_conn.currentText()
@@ -558,4 +600,5 @@ class DashboardScreen(QWidget):
         self.btn_ai_plan.setEnabled(False)
         self.btn_ai_cleanup.setVisible(False)
         self.scan_results = None
+        self.last_ai_recommendation = ""
         self.status_lbl.setText("Ready")

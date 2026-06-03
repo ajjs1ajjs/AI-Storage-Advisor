@@ -417,3 +417,109 @@ class DeepSeekAPIProvider(AIProvider):
             raise Exception(f"DeepSeek connection error: {re}")
         except Exception as e:
             raise Exception(f"DeepSeek fetch models failed: {e}")
+
+
+class CustomAPIProvider(AIProvider):
+    def __init__(self, config: dict):
+        super().__init__(config)
+        self.base_url = config.get("base_url", "https://api.openai.com/v1").rstrip("/")
+        self.api_key = config.get("api_key", "")
+        self.model = config.get("model", "gpt-4")
+        try:
+            self.temp = float(config.get("temperature", 0.7))
+        except (ValueError, TypeError):
+            self.temp = 0.7
+
+    def test_connection(self) -> tuple[bool, str]:
+        if not self.api_key:
+            return False, "API key is missing."
+        try:
+            url = f"{self.base_url}/chat/completions"
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json"
+            }
+            payload = {
+                "model": self.model,
+                "messages": [{"role": "user", "content": "Ping"}],
+                "max_tokens": 5
+            }
+            res = requests.post(url, json=payload, headers=headers, timeout=10)
+            if res.status_code == 200:
+                return True, "Custom API connection successful!"
+            return False, f"Custom API Error {res.status_code}: {res.text}"
+        except Exception as e:
+            return False, f"Custom API connection failed: {e}"
+
+    def _query(self, system: str, user: str) -> str:
+        try:
+            url = f"{self.base_url}/chat/completions"
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json"
+            }
+            payload = {
+                "model": self.model,
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user}
+                ],
+                "temperature": self.temp
+            }
+            res = requests.post(url, json=payload, headers=headers, timeout=60)
+            if res.status_code == 200:
+                return res.json()["choices"][0]["message"]["content"]
+            return f"Custom API Error: {res.text}"
+        except Exception as e:
+            return f"Custom API Request failed: {e}"
+
+    def generate_recommendations(self, disk_summary: str, files_list: list) -> str:
+        system = (
+            "You are an SRE Storage Analytics assistant. Help the user optimize their disk space. "
+            "You MUST write your response entirely in Ukrainian language. "
+            "For each specific file path you recommend to delete, you MUST append a markdown link next to it in the exact format: "
+            "[Видалити](delete://<absolute_path>). For example: "
+            "'- C:\\Users\\Admin\\AppData\\Local\\Temp\\test.log (12.4 MB) - [Видалити](delete://C:/Users/Admin/AppData/Local/Temp/test.log)'."
+        )
+        user = f"Review the disk state and suggest items to clean up.\nDisk Status:\n{disk_summary}\n\nTop Large / Temp / Log files found:\n"
+        for idx, f in enumerate(files_list[:15]):
+            user += f"- {f['path']} ({f['size_formatted']}) - Category: {f['category']}\n"
+        user += "\nProvide clear, structured markdown recommendations, risks of deleting, and an actionable cleanup plan. Write your response entirely in Ukrainian language."
+        return self._query(system, user)
+
+    def explain_folder(self, folder_path: str, details: dict) -> str:
+        system = "You are an AI Storage Assistant explaining disk analysis results. You MUST write your response entirely in Ukrainian language."
+        user = (
+            f"Explain why this folder is marked for cleanup:\n"
+            f"Folder: {folder_path}\n"
+            f"Total Size: {details.get('size_formatted', 'unknown')}\n"
+            f"File Types: {details.get('types', 'unknown')}\n"
+            f"Last Accessed: {details.get('last_access', 'unknown')}\n"
+            f"Risk Level: {details.get('risk_score', 'medium')}/100\n\n"
+            f"Explain what this folder contains, what risks are associated with deleting it, "
+            f"and what could be the potential savings. Write your response entirely in Ukrainian language."
+        )
+        return self._query(system, user)
+
+    def get_available_models(self) -> list[str]:
+        if not self.api_key:
+            raise Exception("API Key is missing. Please enter it first.")
+        try:
+            url = f"{self.base_url}/models"
+            headers = {"Authorization": f"Bearer {self.api_key}"}
+            res = requests.get(url, headers=headers, timeout=10)
+            if res.status_code == 200:
+                models = sorted([m["id"] for m in res.json().get("data", [])])
+                if not models:
+                    raise Exception("Custom API returned an empty list of models.")
+                return models
+            else:
+                try:
+                    err_msg = res.json().get("error", {}).get("message", res.text)
+                except Exception:
+                    err_msg = res.text
+                raise Exception(f"Custom API Error {res.status_code}: {err_msg}")
+        except requests.exceptions.RequestException as re:
+            raise Exception(f"Custom API connection error: {re}")
+        except Exception as e:
+            raise Exception(f"Custom API fetch models failed: {e}")
