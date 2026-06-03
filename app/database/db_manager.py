@@ -17,7 +17,10 @@ class DBManager:
     def connection(self):
         conn = sqlite3.connect(self.db_path, timeout=10.0)
         try:
-            conn.execute("PRAGMA journal_mode=WAL;")
+            try:
+                conn.execute("PRAGMA journal_mode=WAL;")
+            except sqlite3.OperationalError as e:
+                logger.warning(f"Failed to enable WAL journal mode: {e}. Falling back to default journal mode.")
             conn.execute("PRAGMA busy_timeout=10000;")
             conn.row_factory = sqlite3.Row
             with conn:
