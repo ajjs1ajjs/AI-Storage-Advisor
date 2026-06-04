@@ -27,11 +27,45 @@ func InitConfig() {
 	}
 
 	AppDataDir = filepath.Join(AppRoot, "data")
+
+	// Fallback to local AppData if the executable is running from a network drive
+	// or if the data directory is not writable.
+	useLocalFallback := false
+	if isNetworkDrive(AppRoot) {
+		useLocalFallback = true
+		log.Printf("Running from a network drive (%s). Activating local AppData fallback.", AppRoot)
+	} else {
+		// Test write access to AppDataDir
+		if err := os.MkdirAll(AppDataDir, 0755); err != nil {
+			useLocalFallback = true
+			log.Printf("Failed to create data directory: %v. Activating local AppData fallback.", err)
+		} else {
+			testFile := filepath.Join(AppDataDir, ".write_test")
+			if f, err := os.Create(testFile); err != nil {
+				useLocalFallback = true
+				log.Printf("No write permission in data directory: %v. Activating local AppData fallback.", err)
+			} else {
+				f.Close()
+				os.Remove(testFile)
+			}
+		}
+	}
+
+	if useLocalFallback {
+		configDir, err := os.UserConfigDir()
+		if err == nil {
+			AppDataDir = filepath.Join(configDir, AppName)
+		} else {
+			AppDataDir = filepath.Join(os.TempDir(), AppName)
+		}
+		log.Printf("Using local data directory: %s", AppDataDir)
+	}
+
 	DbPath = filepath.Join(AppDataDir, "storage_advisor.db")
 	LogDir = filepath.Join(AppDataDir, "logs")
 	LogFile = filepath.Join(LogDir, "app.log")
 
-	// Ensure directories exist
+	// Ensure final directories exist
 	if err := os.MkdirAll(AppDataDir, 0755); err != nil {
 		log.Printf("Error creating app data dir: %v", err)
 	}
