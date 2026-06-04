@@ -795,6 +795,17 @@ func (a *App) VacuumJournaldLogs(connType string, hostID int) error {
 	return cmd.Run()
 }
 
+// ClearWindowsEventLogs clears all Windows event logs using wevtutil
+func (a *App) ClearWindowsEventLogs(connType string, hostID int) error {
+	if connType == "SSH Remote Linux" || goRuntime.GOOS != "windows" {
+		return errors.New("Windows Event Logs can only be cleared on a local Windows machine")
+	}
+
+	// PowerShell command to clear all event logs
+	psCmd := `wevtutil el | Foreach-Object { wevtutil cl "$_" }`
+	cmd := exec.Command("powershell", "-Command", psCmd)
+	return cmd.Run()
+}
 
 // GetStorageForecast runs chronological size regression
 func (a *App) GetStorageForecast(scanPath string) (forecast.ForecastResult, error) {

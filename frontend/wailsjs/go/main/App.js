@@ -22,6 +22,10 @@ export function ClearPackageCache(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['ClearPackageCache'](arg1, arg2, arg3, arg4);
 }
 
+export function ClearWindowsEventLogs(arg1, arg2) {
+  return window['go']['main']['App']['ClearWindowsEventLogs'](arg1, arg2);
+}
+
 export function DeleteSSHHost(arg1) {
   return window['go']['main']['App']['DeleteSSHHost'](arg1);
 }

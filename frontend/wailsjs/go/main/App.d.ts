@@ -16,6 +16,8 @@ export function ClearContainerLogs(arg1:string,arg2:number,arg3:string):Promise<
 
 export function ClearPackageCache(arg1:string,arg2:number,arg3:string,arg4:string):Promise<void>;
 
+export function ClearWindowsEventLogs(arg1:string,arg2:number):Promise<void>;
+
 export function DeleteSSHHost(arg1:number):Promise<void>;
 
 export function DryRunCleanup(arg1:string,arg2:number,arg3:Array<string>):Promise<cleanup.DryRunResult>;

@@ -699,6 +699,30 @@ window.vacuumJournaldLogs = async function(e) {
     }
 };
 
+window.clearWindowsEventLogs = async function(e) {
+    const btn = e ? e.currentTarget : null;
+    const oldText = btn ? btn.innerText : '';
+    if (btn) {
+        btn.setAttribute('disabled', 'true');
+        btn.innerText = '⏳';
+    }
+    try {
+        const connType = document.getElementById('select-conn-type').value;
+        const hostDropdown = document.getElementById('select-ssh-server');
+        const hostID = parseInt(hostDropdown.value) || 0;
+        
+        await api.ClearWindowsEventLogs(connType, hostID);
+        alert('Windows Event Logs успішно очищено!');
+    } catch (err) {
+        alert('Помилка очищення Windows Event Logs: ' + err);
+    } finally {
+        if (btn) {
+            btn.removeAttribute('disabled');
+            btn.innerText = oldText;
+        }
+    }
+};
+
 export async function sendAIChatMessage() {
     const input = document.getElementById('input-ai-chat');
     const message = input.value.trim();
@@ -787,6 +811,29 @@ window.triggerAIAction = function(actionId, event) {
         if (window.pruneDockerSystem) window.pruneDockerSystem(event);
     } else if (actionId === 'vacuum-journald') {
         if (window.vacuumJournaldLogs) window.vacuumJournaldLogs(event);
+    } else if (actionId === 'clear-event-logs') {
+        if (window.clearWindowsEventLogs) window.clearWindowsEventLogs(event);
+    } else if (actionId.startsWith('clear-package-cache:')) {
+        const pkgName = actionId.split(':')[1].trim().toLowerCase();
+        
+        const sreData = state.scannedResults.sre_data;
+        if (!sreData || !sreData.package_caches) {
+            alert('Дані про кеші не знайдені в результатах сканування.');
+            return;
+        }
+
+        const cache = sreData.package_caches.find(c => c.name.toLowerCase() === pkgName);
+        if (!cache) {
+            alert(`Кеш для пакетного менеджера '${pkgName}' не знайдено.`);
+            return;
+        }
+
+        const connType = document.getElementById('select-conn-type').value;
+        const hostID = parseInt(document.getElementById('select-ssh-server').value) || 0;
+        
+        if (window.clearPackageCache) {
+            window.clearPackageCache(connType, hostID, cache.clean_cmd, cache.path, event);
+        }
     } else {
         alert('Ця дія поки не автоматизована.');
     }

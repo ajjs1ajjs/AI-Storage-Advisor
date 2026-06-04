@@ -30,7 +30,9 @@ func GetRecommendationSystemPrompt() string {
 		"Analyze any SRE Metrics (Docker containers, volumes, Windows system folders like minidumps or IIS logs, and duplicate files space waste) provided in the request. Give detailed professional SRE recommendations on how to handle them. " +
 		"IMPORTANT AUTOMATION RULES: " +
 		"1. If you recommend to clear Docker system space, you MUST append this exact button link next to the recommendation: [🐳 Виконати Prune Docker](action://prune-docker). " +
-		"2. If you recommend to clear Linux Journald logs, you MUST append this exact button link next to the recommendation: [🧹 Очистити Journald](action://vacuum-journald)."
+		"2. If you recommend to clear Linux Journald logs, you MUST append this exact button link next to the recommendation: [🧹 Очистити Journald](action://vacuum-journald). " +
+		"3. If you recommend to clear Windows Event Logs, you MUST append this exact button link next to the recommendation: [🧹 Очистити Event Logs](action://clear-event-logs). " +
+		"4. If you recommend to clear a Package Manager Cache (like Pip, Npm, Yarn), you MUST append this button link format: [📦 Очистити кеш <Name>](action://clear-package-cache:<Name>) where <Name> is the exact package manager name."
 }
 
 func TestConnection(cfg ProviderConfig) (bool, string) {
