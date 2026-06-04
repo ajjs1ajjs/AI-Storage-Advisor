@@ -14,6 +14,14 @@ export function CancelScan() {
   return window['go']['main']['App']['CancelScan']();
 }
 
+export function ClearContainerLogs(arg1, arg2, arg3) {
+  return window['go']['main']['App']['ClearContainerLogs'](arg1, arg2, arg3);
+}
+
+export function ClearPackageCache(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['ClearPackageCache'](arg1, arg2, arg3, arg4);
+}
+
 export function DeleteSSHHost(arg1) {
   return window['go']['main']['App']['DeleteSSHHost'](arg1);
 }
@@ -56,6 +64,10 @@ export function GetStorageForecast(arg1) {
 
 export function GetTheme() {
   return window['go']['main']['App']['GetTheme']();
+}
+
+export function QueryAIChat(arg1) {
+  return window['go']['main']['App']['QueryAIChat'](arg1);
 }
 
 export function SafeDeleteFiles(arg1, arg2) {

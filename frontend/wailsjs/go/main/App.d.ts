@@ -3,6 +3,7 @@
 import {cleanup} from '../models';
 import {scanner} from '../models';
 import {forecast} from '../models';
+import {providers} from '../models';
 import {main} from '../models';
 
 export function AddSSHHost(arg1:string,arg2:string,arg3:number,arg4:string,arg5:string,arg6:string):Promise<void>;
@@ -10,6 +11,10 @@ export function AddSSHHost(arg1:string,arg2:string,arg3:number,arg4:string,arg5:
 export function BrowseFolder():Promise<string>;
 
 export function CancelScan():Promise<void>;
+
+export function ClearContainerLogs(arg1:string,arg2:number,arg3:string):Promise<void>;
+
+export function ClearPackageCache(arg1:string,arg2:number,arg3:string,arg4:string):Promise<void>;
 
 export function DeleteSSHHost(arg1:number):Promise<void>;
 
@@ -32,6 +37,8 @@ export function GetScanRules():Promise<string>;
 export function GetStorageForecast(arg1:string):Promise<forecast.ForecastResult>;
 
 export function GetTheme():Promise<string>;
+
+export function QueryAIChat(arg1:Array<providers.ChatMessage>):Promise<string>;
 
 export function SafeDeleteFiles(arg1:Array<string>,arg2:boolean):Promise<void>;
 

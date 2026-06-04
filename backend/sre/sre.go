@@ -36,12 +36,21 @@ type VolumeInfo struct {
 	SizeFormatted string `json:"size_formatted"`
 }
 
+type PackageCacheInfo struct {
+	Name          string `json:"name"`
+	Path          string `json:"path"`
+	Size          int64  `json:"size"`
+	SizeFormatted string `json:"size_formatted"`
+	CleanCmd      string `json:"clean_cmd"`
+}
+
 type SreReport struct {
 	DockerActive  bool                  `json:"docker_active"`
 	Containers    []ContainerInfo       `json:"containers"`
 	Volumes       []VolumeInfo          `json:"volumes"`
 	WindowsActive bool                  `json:"windows_active"`
 	Folders       map[string]FolderInfo `json:"folders"`
+	PackageCaches []PackageCacheInfo    `json:"package_caches"`
 }
 
 func FormatSize(sizeBytes int64) string {
@@ -91,11 +100,91 @@ func ParseDockerSize(sizeStr string) (int64, int64) {
 	return writeBytes, virtBytes
 }
 
+func getFolderSize(path string) (int64, int) {
+	var size int64
+	var count int
+	_ = filepath.WalkDir(path, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if !d.IsDir() {
+			info, errInfo := d.Info()
+			if errInfo == nil {
+				size += info.Size()
+				count++
+			}
+		}
+		return nil
+	})
+	return size, count
+}
+
+func AnalyzeLocalPackageCaches() []PackageCacheInfo {
+	caches := make([]PackageCacheInfo, 0)
+
+	// Npm Cache
+	appData := os.Getenv("APPDATA")
+	if appData != "" {
+		npmPath := filepath.Join(appData, "npm-cache")
+		if info, err := os.Stat(npmPath); err == nil && info.IsDir() {
+			size, _ := getFolderSize(npmPath)
+			if size > 0 {
+				caches = append(caches, PackageCacheInfo{
+					Name:          "npm (Node.js Cache)",
+					Path:          npmPath,
+					Size:          size,
+					SizeFormatted: FormatSize(size),
+					CleanCmd:      "npm cache clean --force",
+				})
+			}
+		}
+	}
+
+	// Pip Cache
+	localAppData := os.Getenv("LOCALAPPDATA")
+	if localAppData != "" {
+		pipPath := filepath.Join(localAppData, "pip", "Cache")
+		if info, err := os.Stat(pipPath); err == nil && info.IsDir() {
+			size, _ := getFolderSize(pipPath)
+			if size > 0 {
+				caches = append(caches, PackageCacheInfo{
+					Name:          "pip (Python Cache)",
+					Path:          pipPath,
+					Size:          size,
+					SizeFormatted: FormatSize(size),
+					CleanCmd:      "pip cache purge",
+				})
+			}
+		}
+	}
+
+	// NuGet Cache
+	userProfile := os.Getenv("USERPROFILE")
+	if userProfile != "" {
+		nugetPath := filepath.Join(userProfile, ".nuget", "packages")
+		if info, err := os.Stat(nugetPath); err == nil && info.IsDir() {
+			size, _ := getFolderSize(nugetPath)
+			if size > 0 {
+				caches = append(caches, PackageCacheInfo{
+					Name:          "NuGet (.NET Cache)",
+					Path:          nugetPath,
+					Size:          size,
+					SizeFormatted: FormatSize(size),
+					CleanCmd:      "dotnet nuget locals all --clear",
+				})
+			}
+		}
+	}
+
+	return caches
+}
+
 func AnalyzeWindowsSystem() SreReport {
 	isWin := runtime.GOOS == "windows"
 	report := SreReport{
 		WindowsActive: isWin,
 		Folders:       make(map[string]FolderInfo),
+		PackageCaches: make([]PackageCacheInfo, 0),
 	}
 
 	if !isWin {
@@ -163,6 +252,9 @@ func AnalyzeWindowsSystem() SreReport {
 	report.DockerActive = dockerReport.DockerActive
 	report.Containers = dockerReport.Containers
 	report.Volumes = dockerReport.Volumes
+
+	// Probe local package caches
+	report.PackageCaches = AnalyzeLocalPackageCaches()
 
 	return report
 }

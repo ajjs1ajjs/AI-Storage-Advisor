@@ -20,7 +20,10 @@ import {
     SafeDeleteFiles,
     GenerateAIRecommendation,
     GetStorageForecast,
-    BrowseFolder
+    BrowseFolder,
+    QueryAIChat,
+    ClearContainerLogs,
+    ClearPackageCache
 } from '../wailsjs/go/main/App.js';
 
 // Application State
@@ -33,7 +36,8 @@ let state = {
     activeAIProvider: null,
     scanRules: [],
     deletePathsQueue: [],
-    editingSSHId: null
+    editingSSHId: null,
+    chatHistory: []
 };
 
 // Initialisations on DOM Loaded
@@ -165,6 +169,14 @@ function setupEventListeners() {
 
     // Bulk deletion AI click
     document.getElementById('btn-bulk-delete-ai').addEventListener('click', triggerAIRecommendationsCleanup);
+
+    // Send AI Chat message
+    document.getElementById('btn-send-ai-chat').addEventListener('click', sendAIChatMessage);
+    document.getElementById('input-ai-chat').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            sendAIChatMessage();
+        }
+    });
 
     // Accordion tabs switching
     document.querySelectorAll('.accordion-tab').forEach(tab => {
@@ -416,12 +428,20 @@ function renderScanResults(results) {
         devopsCard.classList.remove('hidden');
         const containerBody = document.querySelector('#table-sre-containers tbody');
         containerBody.innerHTML = '';
+        
+        const connType = document.getElementById('select-conn-type').value;
+        const hostDropdown = document.getElementById('select-ssh-server');
+        const hostID = parseInt(hostDropdown.value) || 0;
+
         sreData.containers.forEach(c => {
             containerBody.innerHTML += `<tr>
                 <td>${c.name}</td>
                 <td>${c.image}</td>
                 <td class="${c.write_size > 1024*1024*1024 ? 'text-danger bold' : ''}">${c.write_size_formatted}</td>
                 <td>${c.virtual_size_formatted}</td>
+                <td class="col-action">
+                    <button class="btn btn-secondary btn-icon" onclick="clearContainerLogs('${connType}', ${hostID}, '${c.id}')" title="Очистити логи контейнера">🧹</button>
+                </td>
             </tr>`;
         });
 
@@ -451,6 +471,33 @@ function renderScanResults(results) {
         });
     } else {
         winSreCard.classList.add('hidden');
+    }
+
+    // Populate Package Caches SRE Card
+    const packageCacheCard = document.getElementById('package-cache-sre-card');
+    if (sreData && sreData.package_caches && sreData.package_caches.length > 0) {
+        packageCacheCard.classList.remove('hidden');
+        const cacheBody = document.querySelector('#table-sre-package-caches tbody');
+        cacheBody.innerHTML = '';
+        
+        const connType = document.getElementById('select-conn-type').value;
+        const hostDropdown = document.getElementById('select-ssh-server');
+        const hostID = parseInt(hostDropdown.value) || 0;
+
+        sreData.package_caches.forEach(pc => {
+            const escapedCleanCmd = pc.clean_cmd.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+            const escapedPath = pc.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+            cacheBody.innerHTML += `<tr>
+                <td>${pc.name}</td>
+                <td style="word-break: break-all;">${pc.path}</td>
+                <td class="${pc.size > 1024*1024*1024 ? 'text-danger bold' : ''}">${pc.size_formatted}</td>
+                <td class="col-action-wide">
+                    <button class="btn btn-secondary btn-sm" onclick="clearPackageCache('${connType}', ${hostID}, '${escapedCleanCmd}', '${escapedPath}')">🧹 Очистити кеш</button>
+                </td>
+            </tr>`;
+        });
+    } else {
+        packageCacheCard.classList.add('hidden');
     }
 }
 
@@ -709,9 +756,70 @@ async function generateAIRecommendation() {
     aiBtn.innerText = '🤖 ШІ аналізує...';
     chatBrowser.innerHTML = '<p class="placeholder-text" style="color: var(--color-accent); font-weight: 600;">🤖 Надсилання запиту до штучного інтелекту... Будь ласка, зачекайте.</p>';
 
-    // Prepare drive statistics
-    const summary = `Connection Type: Local\nTotal Drive Capacity Scanned: ${state.scannedResults.total_size_formatted}\nTotal Files Traversed: ${state.scannedResults.files_scanned}\nFlagged Size: ${formatBytes(state.scannedResults.rules_flagged_size)}`;
-    
+    // Prepare drive statistics with Connection Type, OS, SRE metrics and Duplicates
+    const connType = document.getElementById('select-conn-type').value;
+    const sreData = state.scannedResults.sre_data;
+    let targetOS = 'Unknown';
+    if (connType === 'SSH Remote Linux') {
+        targetOS = 'Linux';
+    } else if (sreData && sreData.windows_active) {
+        targetOS = 'Windows';
+    } else {
+        targetOS = 'Local OS';
+    }
+
+    let summary = `Connection Type: ${connType}\n`;
+    summary += `Target Operating System: ${targetOS}\n`;
+    summary += `Total Drive Capacity Scanned: ${state.scannedResults.total_size_formatted}\n`;
+    summary += `Total Files Traversed: ${state.scannedResults.files_scanned}\n`;
+    summary += `Flagged Size: ${formatBytes(state.scannedResults.rules_flagged_size || 0)}\n`;
+
+    // Add DevOps Docker SRE metrics
+    if (sreData && sreData.docker_active) {
+        summary += `\nDocker SRE Metrics:\n`;
+        if (sreData.containers && sreData.containers.length > 0) {
+            summary += `- Active Containers Write Layers:\n`;
+            sreData.containers.forEach(c => {
+                summary += `  * Container: ${c.name} (Image: ${c.image}) - Write size: ${c.write_size_formatted}, Virtual size: ${c.virtual_size_formatted}\n`;
+            });
+        }
+        if (sreData.volumes && sreData.volumes.length > 0) {
+            summary += `- Docker Volumes:\n`;
+            sreData.volumes.forEach(v => {
+                summary += `  * Volume: ${v.name} - Size: ${v.size_formatted}\n`;
+            });
+        }
+    }
+
+    // Add Windows SRE folder metrics
+    if (sreData && sreData.windows_active && sreData.folders) {
+        summary += `\nWindows System Folders Metrics:\n`;
+        Object.entries(sreData.folders).forEach(([key, f]) => {
+            summary += `- ${key.toUpperCase()}: Path "${f.path}" contains ${f.count} files, Size: ${f.size_formatted}\n`;
+        });
+    }
+
+    // Add duplicate files waste
+    let dupWaste = 0;
+    if (state.scannedResults.duplicate_groups) {
+        Object.values(state.scannedResults.duplicate_groups).forEach(paths => {
+            if (paths.length > 1) {
+                dupWaste += (paths.length - 1) * paths[0].size;
+            }
+        });
+    }
+    if (dupWaste > 0) {
+        summary += `\nDuplicate Files Space Waste: ${formatBytes(dupWaste)}\n`;
+    }
+
+    // Add Package Cache metrics
+    if (sreData && sreData.package_caches && sreData.package_caches.length > 0) {
+        summary += `\nPackage Manager Caches:\n`;
+        sreData.package_caches.forEach(pc => {
+            summary += `- ${pc.name}: Path "${pc.path}", Size: ${pc.size_formatted} (Clean command: "${pc.clean_cmd}")\n`;
+        });
+    }
+
     try {
         const filesList = [
             ...state.scannedResults.large_files,
@@ -721,16 +829,113 @@ async function generateAIRecommendation() {
 
         const rec = await GenerateAIRecommendation(summary, filesList);
         
-        // Render Ukrainian markdown recommendations with click links support
-        chatBrowser.innerHTML = renderMarkdown(rec);
-        bulkDeleteBtn.classList.remove('hidden');
+        // Initialize chat history and render first bubble
+        state.chatHistory = [
+            { role: 'assistant', content: rec }
+        ];
+
+        chatBrowser.innerHTML = `<div class="chat-bubble assistant">${renderMarkdown(rec)}</div>`;
+        document.getElementById('ai-chat-input-bar').classList.remove('hidden');
+        
+        if (connType === 'SSH Remote Linux') {
+            bulkDeleteBtn.classList.add('hidden');
+        } else {
+            bulkDeleteBtn.classList.remove('hidden');
+        }
+
+        // Scroll chat to bottom
+        chatBrowser.scrollTop = chatBrowser.scrollHeight;
     } catch (err) {
         chatBrowser.innerHTML = `<p class="placeholder-text text-danger">⚠️ Помилка ШІ: ${err.message || err}</p>`;
         bulkDeleteBtn.classList.add('hidden');
+        document.getElementById('ai-chat-input-bar').classList.add('hidden');
     } finally {
         aiBtn.removeAttribute('disabled');
         aiBtn.innerText = 'Згенерувати рекомендації ШІ';
     }
+}
+
+// Global DevOps SRE Cleaner bridges
+window.clearContainerLogs = async function(connType, hostID, containerID) {
+    const btn = event.currentTarget;
+    const oldText = btn.innerText;
+    btn.setAttribute('disabled', 'true');
+    btn.innerText = '⏳';
+    try {
+        await ClearContainerLogs(connType, hostID, containerID);
+        alert('Логи контейнера успішно очищено!');
+        // Update size text in container row (Write Layer Size)
+        const sizeCell = btn.parentElement.previousElementSibling.previousElementSibling;
+        sizeCell.innerText = '0.00 B';
+        sizeCell.classList.remove('text-danger', 'bold');
+    } catch (err) {
+        alert('Помилка очищення логів: ' + err);
+    } finally {
+        btn.removeAttribute('disabled');
+        btn.innerText = oldText;
+    }
+};
+
+window.clearPackageCache = async function(connType, hostID, cleanCmd, cachePath) {
+    const btn = event.currentTarget;
+    const oldText = btn.innerText;
+    btn.setAttribute('disabled', 'true');
+    btn.innerText = '⏳';
+    try {
+        await ClearPackageCache(connType, hostID, cleanCmd, cachePath);
+        alert('Кеш успішно очищено!');
+        // Update size text in SRE row (size cell is right before button cell)
+        const sizeCell = btn.parentElement.previousElementSibling;
+        sizeCell.innerText = '0.00 B';
+        sizeCell.classList.remove('text-danger', 'bold');
+    } catch (err) {
+        alert('Помилка очищення кешу: ' + err);
+    } finally {
+        btn.removeAttribute('disabled');
+        btn.innerText = oldText;
+    }
+};
+
+// Conversational AI chat follow-up sender
+async function sendAIChatMessage() {
+    const input = document.getElementById('input-ai-chat');
+    const message = input.value.trim();
+    if (!message) return;
+
+    input.value = '';
+    
+    const chatBrowser = document.getElementById('ai-chat-browser');
+    const sendBtn = document.getElementById('btn-send-ai-chat');
+
+    // Add user message to history and render bubble
+    state.chatHistory.push({ role: 'user', content: message });
+    chatBrowser.innerHTML += `<div class="chat-bubble user">${escapeHtml(message)}</div>`;
+    chatBrowser.scrollTop = chatBrowser.scrollHeight;
+
+    // Loading state for send button
+    sendBtn.setAttribute('disabled', 'true');
+    sendBtn.innerText = '⏳';
+
+    try {
+        const response = await QueryAIChat(state.chatHistory);
+        state.chatHistory.push({ role: 'assistant', content: response });
+        chatBrowser.innerHTML += `<div class="chat-bubble assistant">${renderMarkdown(response)}</div>`;
+    } catch (err) {
+        chatBrowser.innerHTML += `<div class="chat-bubble assistant text-danger">⚠️ Помилка ШІ: ${err.message || err}</div>`;
+    } finally {
+        sendBtn.removeAttribute('disabled');
+        sendBtn.innerText = 'Надіслати';
+        chatBrowser.scrollTop = chatBrowser.scrollHeight;
+    }
+}
+
+function escapeHtml(text) {
+    return text
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
 }
 
 // Intercept AI markdown delete:// URL clicks

@@ -334,6 +334,7 @@ func ScanRemoteSSH(ctx context.Context, hostConfig map[string]interface{}, targe
 
 	// 4. Remote DevOps SRE Docker analysis
 	sreData := AnalyzeRemoteDocker(client)
+	sreData.PackageCaches = AnalyzeRemotePackageCaches(client)
 
 	results := ScanResults{
 		TotalSize:          scannedSize,
@@ -446,4 +447,57 @@ func AnalyzeRemoteDocker(client *ssh.Client) sre.SreReport {
 	}
 
 	return report
+}
+
+func AnalyzeRemotePackageCaches(client *ssh.Client) []sre.PackageCacheInfo {
+	caches := make([]sre.PackageCacheInfo, 0)
+	cmd := "du -sb /var/cache/apt/archives /var/cache/dnf /var/cache/yum ~/.npm ~/.cache/pip 2>/dev/null"
+	out, err := RunSSHCommand(client, cmd)
+	if err != nil {
+		return caches
+	}
+
+	lines := strings.Split(out, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		sizeVal, errSize := strconv.ParseInt(fields[0], 10, 64)
+		if errSize != nil {
+			continue
+		}
+		p := fields[1]
+
+		name := ""
+		cleanCmd := ""
+		if strings.Contains(p, "apt") {
+			name = "apt (Debian/Ubuntu Cache)"
+			cleanCmd = "sudo apt-get clean || apt-get clean"
+		} else if strings.Contains(p, "dnf") || strings.Contains(p, "yum") {
+			name = "yum/dnf (RHEL/CentOS Cache)"
+			cleanCmd = "sudo dnf clean all || sudo yum clean all"
+		} else if strings.Contains(p, ".npm") {
+			name = "npm (Node.js Cache)"
+			cleanCmd = "npm cache clean --force"
+		} else if strings.Contains(p, "pip") {
+			name = "pip (Python Cache)"
+			cleanCmd = "pip cache purge"
+		}
+
+		if name != "" && sizeVal > 0 {
+			caches = append(caches, sre.PackageCacheInfo{
+				Name:          name,
+				Path:          p,
+				Size:          sizeVal,
+				SizeFormatted: sre.FormatSize(sizeVal),
+				CleanCmd:      cleanCmd,
+			})
+		}
+	}
+	return caches
 }

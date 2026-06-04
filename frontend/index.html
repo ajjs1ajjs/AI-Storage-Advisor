@@ -144,7 +144,7 @@
                     <div class="results-main-split">
                         <!-- Left Side: AI Recommendations & SRE DevOps Logs -->
                         <div class="results-left-pane">
-                            <div class="card ai-card">
+                            <div class="card ai-card" style="height: 540px; display: flex; flex-direction: column;">
                                 <div class="ai-card-header">
                                     <div class="ai-title-row">
                                         <span class="ai-robot-icon">🤖</span>
@@ -155,8 +155,13 @@
                                         <button id="btn-bulk-delete-ai" class="btn btn-danger hidden">🧹 Видалити рекомендоване ШІ</button>
                                     </div>
                                 </div>
-                                <div class="ai-chat-browser" id="ai-chat-browser">
+                                <div class="ai-chat-browser" id="ai-chat-browser" style="flex-grow: 1; margin-bottom: 10px;">
                                     <p class="placeholder-text">Натисніть "Згенерувати рекомендації ШІ", щоб штучний інтелект проаналізував знайдені файли.</p>
+                                </div>
+                                <!-- Chat input bar (hidden until recommendations are generated) -->
+                                <div class="ai-chat-input-bar hidden" id="ai-chat-input-bar">
+                                    <input type="text" id="input-ai-chat" class="form-input" placeholder="Задайте додаткове питання ШІ...">
+                                    <button id="btn-send-ai-chat" class="btn btn-primary">Надіслати</button>
                                 </div>
                             </div>
 
@@ -173,6 +178,7 @@
                                                     <th>Образ</th>
                                                     <th>Write Layer Size</th>
                                                     <th>Virtual Size</th>
+                                                    <th class="col-action">Дія</th>
                                                 </tr>
                                             </thead>
                                             <tbody>
@@ -211,6 +217,26 @@
                                                 <th>Шлях</th>
                                                 <th>Файлів</th>
                                                 <th>Об'єм</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <!-- Dynamic rows -->
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                            <!-- Package Caches SRE Info Card -->
+                            <div class="card sre-card hidden" id="package-cache-sre-card">
+                                <h3>📦 Кеші пакетних менеджерів (Package Caches)</h3>
+                                <div class="table-container">
+                                    <table class="data-table" id="table-sre-package-caches">
+                                        <thead>
+                                            <tr>
+                                                <th>Пакетний менеджер</th>
+                                                <th>Шлях до кешу</th>
+                                                <th>Об'єм</th>
+                                                <th class="col-action-wide">Дія</th>
                                             </tr>
                                         </thead>
                                         <tbody>

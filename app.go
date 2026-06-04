@@ -6,6 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os/exec"
+	goRuntime "runtime"
+	"strings"
 
 	"aisadvisor/backend/cleanup"
 	"aisadvisor/backend/config"
@@ -500,6 +503,104 @@ func (a *App) GenerateAIRecommendation(diskSummary string, filesList []scanner.F
 	user += "\nProvide clear, structured markdown recommendations, risks of deleting, and an actionable cleanup plan. Write your response entirely in Ukrainian language."
 
 	return providers.QueryAI(cfg, system, user)
+}
+
+// QueryAIChat sends the conversational message history to the selected AI provider
+func (a *App) QueryAIChat(history []providers.ChatMessage) (string, error) {
+	// Fetch active provider config
+	var name, typeVal, encConfig string
+	err := db.DB.QueryRow("SELECT name, type, config_json FROM ai_providers WHERE profile_id = ? AND is_selected = 1", a.profileID).Scan(&name, &typeVal, &encConfig)
+	if err != nil {
+		return "", errors.New("no active AI provider selected in Settings")
+	}
+
+	decConfig, err := security.Decrypt(encConfig)
+	if err != nil {
+		return "", errors.New("failed to decrypt AI provider configuration")
+	}
+
+	var cfg providers.ProviderConfig
+	if err := json.Unmarshal([]byte(decConfig), &cfg); err != nil {
+		return "", err
+	}
+	cfg.Type = typeVal
+
+	system := providers.GetRecommendationSystemPrompt()
+	return providers.QueryAIChat(cfg, system, history)
+}
+
+// ClearContainerLogs truncates logs for a specific Docker container
+func (a *App) ClearContainerLogs(connType string, hostID int, containerID string) error {
+	if connType == "SSH Remote Linux" {
+		var host, username, authType, credentials string
+		var port int
+		errHost := db.DB.QueryRow("SELECT host, port, username, auth_type, credentials FROM ssh_hosts WHERE id = ? AND profile_id = ?", hostID, a.profileID).Scan(&host, &port, &username, &authType, &credentials)
+		if errHost != nil {
+			return errHost
+		}
+		decCredentials := ""
+		if credentials != "" {
+			decCredentials, _ = security.Decrypt(credentials)
+		}
+		client, err := scanner.ConnectSSH(host, port, username, authType, decCredentials)
+		if err != nil {
+			return err
+		}
+		defer client.Close()
+
+		// Retrieve container log path and truncate it
+		cmd := fmt.Sprintf("log_path=$(docker inspect --format='{{.LogPath}}' %s) && (sudo truncate -s 0 $log_path || truncate -s 0 $log_path)", containerID)
+		_, errCmd := scanner.RunSSHCommand(client, cmd)
+		return errCmd
+	} else {
+		// Local truncate using a helper container to handle WSL Docker Desktop paths
+		logPathCmd := exec.Command("docker", "inspect", "--format", "{{.LogPath}}", containerID)
+		logPathBytes, err := logPathCmd.Output()
+		if err != nil {
+			return fmt.Errorf("failed to locate container log path: %w", err)
+		}
+		logPath := strings.TrimSpace(string(logPathBytes))
+		if logPath == "" {
+			return fmt.Errorf("empty log path returned")
+		}
+
+		// Run alpine truncate helper container
+		helperCmd := exec.Command("docker", "run", "--rm", "-v", "/var/lib/docker:/var/lib/docker", "alpine", "truncate", "-s", "0", logPath)
+		return helperCmd.Run()
+	}
+}
+
+// ClearPackageCache runs clean commands for package manager caches
+func (a *App) ClearPackageCache(connType string, hostID int, cleanCmd string, cachePath string) error {
+	if connType == "SSH Remote Linux" {
+		var host, username, authType, credentials string
+		var port int
+		errHost := db.DB.QueryRow("SELECT host, port, username, auth_type, credentials FROM ssh_hosts WHERE id = ? AND profile_id = ?", hostID, a.profileID).Scan(&host, &port, &username, &authType, &credentials)
+		if errHost != nil {
+			return errHost
+		}
+		decCredentials := ""
+		if credentials != "" {
+			decCredentials, _ = security.Decrypt(credentials)
+		}
+		client, err := scanner.ConnectSSH(host, port, username, authType, decCredentials)
+		if err != nil {
+			return err
+		}
+		defer client.Close()
+
+		_, errCmd := scanner.RunSSHCommand(client, cleanCmd)
+		return errCmd
+	} else {
+		// Run command locally using native cmd / shell
+		var cmd *exec.Cmd
+		if goRuntime.GOOS == "windows" {
+			cmd = exec.Command("cmd", "/c", cleanCmd)
+		} else {
+			cmd = exec.Command("sh", "-c", cleanCmd)
+		}
+		return cmd.Run()
+	}
 }
 
 // GetStorageForecast runs chronological size regression
