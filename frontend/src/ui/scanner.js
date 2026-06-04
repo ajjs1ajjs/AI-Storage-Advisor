@@ -769,14 +769,28 @@ export function renderMarkdown(md) {
     
     html = html.replace(/^\s*-\s+(.*)/gm, '<li>$1</li>');
     
-    html = html.replace(/\[Видалити\]\(delete:\/\/([^\)]+)\)/g, (match, urlPath) => {
+    html = html.replace(/\[([^\]]+)\]\(delete:\/\/([^\)]+)\)/g, (match, label, urlPath) => {
         const decoded = decodeURIComponent(urlPath);
         const escaped = decoded.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-        return `<a class="delete-link" href="#" onclick="confirmSingleDeleteFromLink('${escaped}'); return false;">Видалити</a>`;
+        return `<a class="delete-link" href="#" onclick="confirmSingleDeleteFromLink('${escaped}'); return false;">${label}</a>`;
+    });
+
+    html = html.replace(/\[([^\]]+)\]\(action:\/\/([^\)]+)\)/g, (match, label, actionId) => {
+        return `<button class="btn btn-secondary btn-sm" onclick="triggerAIAction('${actionId}', event)" style="margin-left: 10px;">⚡ ${label}</button>`;
     });
 
     return html;
 }
+
+window.triggerAIAction = function(actionId, event) {
+    if (actionId === 'prune-docker') {
+        if (window.pruneDockerSystem) window.pruneDockerSystem(event);
+    } else if (actionId === 'vacuum-journald') {
+        if (window.vacuumJournaldLogs) window.vacuumJournaldLogs(event);
+    } else {
+        alert('Ця дія поки не автоматизована.');
+    }
+};
 
 export function triggerAIRecommendationsCleanup() {
     const chatBrowser = document.getElementById('ai-chat-browser');

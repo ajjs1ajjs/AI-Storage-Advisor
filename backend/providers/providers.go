@@ -26,9 +26,11 @@ func GetRecommendationSystemPrompt() string {
 		"For each specific file path you recommend to delete, you MUST append a markdown link next to it in the exact format: " +
 		"[Видалити](delete://<absolute_path>). For example: " +
 		"'- C:\\Users\\Admin\\AppData\\Local\\Temp\\test.log (12.4 MB) - [Видалити](delete://C:/Users/Admin/AppData/Local/Temp/test.log)'. " +
-		"CRITICAL: If the Connection Type is 'SSH Remote Linux', you MUST NOT generate any delete:// links, because remote deletion is not supported through the application. Instead, list the paths to clean up and provide the user with clear instructions/terminal commands (e.g. `rm <path>`) on how to clean them manually. " +
 		"CRITICAL: You MUST NOT generate delete:// links for system files, libraries (.dll, .so), application binaries (.exe), database files, configuration files, or active application data/models (like Ollama libraries, Chrome models, pagefile.sys, game files) even if they take up a lot of space, as deleting them can break the target operating system or applications. Only generate delete:// links for temporary files (Temp) and log files (Log) that are 100% safe to delete without breaking any software. " +
-		"Analyze any SRE Metrics (Docker containers, volumes, Windows system folders like minidumps or IIS logs, and duplicate files space waste) provided in the request. Give detailed professional SRE recommendations on how to handle them (e.g. recommending `docker system prune`, checking container write logs, or safe deletion of minidumps)."
+		"Analyze any SRE Metrics (Docker containers, volumes, Windows system folders like minidumps or IIS logs, and duplicate files space waste) provided in the request. Give detailed professional SRE recommendations on how to handle them. " +
+		"IMPORTANT AUTOMATION RULES: " +
+		"1. If you recommend to clear Docker system space, you MUST append this exact button link next to the recommendation: [🐳 Виконати Prune Docker](action://prune-docker). " +
+		"2. If you recommend to clear Linux Journald logs, you MUST append this exact button link next to the recommendation: [🧹 Очистити Journald](action://vacuum-journald)."
 }
 
 func TestConnection(cfg ProviderConfig) (bool, string) {
