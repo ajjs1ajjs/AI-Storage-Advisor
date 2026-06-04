@@ -113,7 +113,7 @@ func (a *App) GetRecentScans() ([]map[string]interface{}, error) {
 
 // GetSSHHosts fetches saved SSH servers
 func (a *App) GetSSHHosts() ([]map[string]interface{}, error) {
-	rows, err := db.DB.Query("SELECT id, name, host, port, username, auth_type, credentials FROM ssh_hosts WHERE profile_id = ?", a.profileID)
+	rows, err := db.DB.Query("SELECT id, name, host, port, username, auth_type, credentials, key_passphrase FROM ssh_hosts WHERE profile_id = ?", a.profileID)
 	if err != nil {
 		return nil, err
 	}
@@ -123,20 +123,25 @@ func (a *App) GetSSHHosts() ([]map[string]interface{}, error) {
 	for rows.Next() {
 		var id, port int
 		var name, host, username, authType string
-		var credentials sql.NullString
-		if err := rows.Scan(&id, &name, &host, &port, &username, &authType, &credentials); err == nil {
+		var credentials, keyPassphrase sql.NullString
+		if err := rows.Scan(&id, &name, &host, &port, &username, &authType, &credentials, &keyPassphrase); err == nil {
 			var decCred string
 			if credentials.Valid && credentials.String != "" {
 				decCred, _ = security.Decrypt(credentials.String)
 			}
+			kp := ""
+			if keyPassphrase.Valid {
+				kp = keyPassphrase.String
+			}
 			results = append(results, map[string]interface{}{
-				"id":          id,
-				"name":        name,
-				"host":        host,
-				"port":        port,
-				"username":    username,
-				"auth_type":   authType,
-				"credentials": decCred,
+				"id":             id,
+				"name":           name,
+				"host":           host,
+				"port":           port,
+				"username":       username,
+				"auth_type":      authType,
+				"credentials":    decCred,
+				"key_passphrase": kp,
 			})
 		}
 	}
@@ -144,7 +149,7 @@ func (a *App) GetSSHHosts() ([]map[string]interface{}, error) {
 }
 
 // AddSSHHost creates a new server item
-func (a *App) AddSSHHost(name, host string, port int, username, authType, credentials string) error {
+func (a *App) AddSSHHost(name, host string, port int, username, authType, credentials, keyPassphrase string) error {
 	encCred := ""
 	if credentials != "" {
 		var err error
@@ -155,14 +160,14 @@ func (a *App) AddSSHHost(name, host string, port int, username, authType, creden
 	}
 
 	_, err := db.DB.Exec(
-		"INSERT INTO ssh_hosts (profile_id, name, host, port, username, auth_type, credentials) VALUES (?, ?, ?, ?, ?, ?, ?)",
-		a.profileID, name, host, port, username, authType, encCred,
+		"INSERT INTO ssh_hosts (profile_id, name, host, port, username, auth_type, credentials, key_passphrase) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+		a.profileID, name, host, port, username, authType, encCred, keyPassphrase,
 	)
 	return err
 }
 
 // EditSSHHost updates existing server credentials
-func (a *App) EditSSHHost(id int, name, host string, port int, username, authType, credentials string) error {
+func (a *App) EditSSHHost(id int, name, host string, port int, username, authType, credentials, keyPassphrase string) error {
 	encCred := ""
 	if credentials != "" {
 		var err error
@@ -173,8 +178,8 @@ func (a *App) EditSSHHost(id int, name, host string, port int, username, authTyp
 	}
 
 	_, err := db.DB.Exec(
-		"UPDATE ssh_hosts SET name = ?, host = ?, port = ?, username = ?, auth_type = ?, credentials = ? WHERE id = ? AND profile_id = ?",
-		name, host, port, username, authType, encCred, id, a.profileID,
+		"UPDATE ssh_hosts SET name = ?, host = ?, port = ?, username = ?, auth_type = ?, credentials = ?, key_passphrase = ? WHERE id = ? AND profile_id = ?",
+		name, host, port, username, authType, encCred, keyPassphrase, id, a.profileID,
 	)
 	return err
 }
@@ -210,7 +215,27 @@ func (a *App) GetScanRules() (string, error) {
 	return val, nil
 }
 
-// GetAIProviders fetches all AI configs
+// SaveSetting persists generic settings
+func (a *App) SaveSetting(key, value string) error {
+	_, err := db.DB.Exec(
+		"INSERT INTO settings (profile_id, setting_key, setting_value) VALUES (?, ?, ?) "+
+			"ON CONFLICT(profile_id, setting_key) DO UPDATE SET setting_value = excluded.setting_value",
+		a.profileID, key, value,
+	)
+	return err
+}
+
+// GetSetting fetches generic settings
+func (a *App) GetSetting(key string) (string, error) {
+	var val string
+	err := db.DB.QueryRow("SELECT setting_value FROM settings WHERE setting_key = ? AND profile_id = ?", key, a.profileID).Scan(&val)
+	if err != nil {
+		return "", err
+	}
+	return val, nil
+}
+
+// GetAIProviders fetches configured providers
 func (a *App) GetAIProviders() ([]map[string]interface{}, error) {
 	rows, err := db.DB.Query("SELECT name, type, config_json, is_selected FROM ai_providers WHERE profile_id = ?", a.profileID)
 	if err != nil {
@@ -320,9 +345,9 @@ func (a *App) StartScan(connType string, hostID int, scanPath string) string {
 
 		if connType == "SSH Remote Linux" {
 			// Fetch host configuration
-			var host, username, authType, credentials string
+			var host, username, authType, credentials, keyPassphrase string
 			var port int
-			errHost := db.DB.QueryRow("SELECT host, port, username, auth_type, credentials FROM ssh_hosts WHERE id = ? AND profile_id = ?", hostID, a.profileID).Scan(&host, &port, &username, &authType, &credentials)
+			errHost := db.DB.QueryRow("SELECT host, port, username, auth_type, credentials, key_passphrase FROM ssh_hosts WHERE id = ? AND profile_id = ?", hostID, a.profileID).Scan(&host, &port, &username, &authType, &credentials, &keyPassphrase)
 			if errHost != nil {
 				runtime.EventsEmit(a.ctx, "scan:finished", map[string]interface{}{"error": "Saved SSH Host credentials not found."})
 				return
@@ -333,11 +358,12 @@ func (a *App) StartScan(connType string, hostID int, scanPath string) string {
 			}
 
 			cfgMap := map[string]interface{}{
-				"host":        host,
-				"port":        float64(port),
-				"username":    username,
-				"auth_type":   authType,
-				"credentials": decCredentials,
+				"host":           host,
+				"port":           float64(port),
+				"username":       username,
+				"auth_type":      authType,
+				"credentials":    decCredentials,
+				"key_passphrase": keyPassphrase,
 			}
 
 			results, scanErr = scanner.ScanRemoteSSH(scanCtx, cfgMap, scanPath, activeRules, func(status string, filesScanned int, totalSize int64) {
@@ -500,7 +526,14 @@ func (a *App) GenerateAIRecommendation(diskSummary string, filesList []scanner.F
 		}
 		user += fmt.Sprintf("- %s (%s) - Category: %s\n", f.Path, f.SizeFormatted, f.Category)
 	}
-	user += "\nProvide clear, structured markdown recommendations, risks of deleting, and an actionable cleanup plan. Write your response entirely in Ukrainian language."
+	lang := "Ukrainian"
+	var dbLang string
+	errLang := db.DB.QueryRow("SELECT setting_value FROM settings WHERE setting_key = 'ai_language' AND profile_id = ?", a.profileID).Scan(&dbLang)
+	if errLang == nil && dbLang != "" {
+		lang = dbLang
+	}
+
+	user += fmt.Sprintf("\nProvide clear, structured markdown recommendations, risks of deleting, and an actionable cleanup plan. Write your response entirely in %s language.", lang)
 
 	return providers.QueryAI(cfg, system, user)
 }
@@ -532,9 +565,9 @@ func (a *App) QueryAIChat(history []providers.ChatMessage) (string, error) {
 // ClearContainerLogs truncates logs for a specific Docker container
 func (a *App) ClearContainerLogs(connType string, hostID int, containerID string) error {
 	if connType == "SSH Remote Linux" {
-		var host, username, authType, credentials string
+		var host, username, authType, credentials, keyPassphrase string
 		var port int
-		errHost := db.DB.QueryRow("SELECT host, port, username, auth_type, credentials FROM ssh_hosts WHERE id = ? AND profile_id = ?", hostID, a.profileID).Scan(&host, &port, &username, &authType, &credentials)
+		errHost := db.DB.QueryRow("SELECT host, port, username, auth_type, credentials, key_passphrase FROM ssh_hosts WHERE id = ? AND profile_id = ?", hostID, a.profileID).Scan(&host, &port, &username, &authType, &credentials, &keyPassphrase)
 		if errHost != nil {
 			return errHost
 		}
@@ -542,7 +575,7 @@ func (a *App) ClearContainerLogs(connType string, hostID int, containerID string
 		if credentials != "" {
 			decCredentials, _ = security.Decrypt(credentials)
 		}
-		client, err := scanner.ConnectSSH(host, port, username, authType, decCredentials)
+		client, err := scanner.ConnectSSH(host, port, username, authType, decCredentials, keyPassphrase)
 		if err != nil {
 			return err
 		}
@@ -573,9 +606,9 @@ func (a *App) ClearContainerLogs(connType string, hostID int, containerID string
 // ClearPackageCache runs clean commands for package manager caches
 func (a *App) ClearPackageCache(connType string, hostID int, cleanCmd string, cachePath string) error {
 	if connType == "SSH Remote Linux" {
-		var host, username, authType, credentials string
+		var host, username, authType, credentials, keyPassphrase string
 		var port int
-		errHost := db.DB.QueryRow("SELECT host, port, username, auth_type, credentials FROM ssh_hosts WHERE id = ? AND profile_id = ?", hostID, a.profileID).Scan(&host, &port, &username, &authType, &credentials)
+		errHost := db.DB.QueryRow("SELECT host, port, username, auth_type, credentials, key_passphrase FROM ssh_hosts WHERE id = ? AND profile_id = ?", hostID, a.profileID).Scan(&host, &port, &username, &authType, &credentials, &keyPassphrase)
 		if errHost != nil {
 			return errHost
 		}
@@ -583,7 +616,7 @@ func (a *App) ClearPackageCache(connType string, hostID int, cleanCmd string, ca
 		if credentials != "" {
 			decCredentials, _ = security.Decrypt(credentials)
 		}
-		client, err := scanner.ConnectSSH(host, port, username, authType, decCredentials)
+		client, err := scanner.ConnectSSH(host, port, username, authType, decCredentials, keyPassphrase)
 		if err != nil {
 			return err
 		}

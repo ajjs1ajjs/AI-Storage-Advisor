@@ -2,16 +2,20 @@ package scanner
 
 import (
 	"context"
-	"crypto/md5"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
+
+	"github.com/cespare/xxhash/v2"
+	"golang.org/x/sync/errgroup"
 
 	"aisadvisor/backend/rules"
 	"aisadvisor/backend/sre"
@@ -90,7 +94,6 @@ func ScanLocalDisk(ctx context.Context, startPath string, activeRules []rules.Ru
 		}
 
 		if err != nil {
-			// Skip directories with access denied errors, but do not skip the rest of the parent directory if a file has an error
 			if d != nil && d.IsDir() {
 				return filepath.SkipDir
 			}
@@ -106,7 +109,7 @@ func ScanLocalDisk(ctx context.Context, startPath string, activeRules []rules.Ru
 			return nil
 		}
 
-		// Progress reporting (throttled to max 10/sec)
+		// Progress reporting
 		filesScanned++
 		info, err := d.Info()
 		if err != nil {
@@ -125,7 +128,7 @@ func ScanLocalDisk(ctx context.Context, startPath string, activeRules []rules.Ru
 		nameLower := strings.ToLower(name)
 		pathLower := strings.ToLower(path)
 
-		lastAccess := info.ModTime().Format("2006-01-02 15:04:05") // ModTime is closest safe fallback for access
+		lastAccess := info.ModTime().Format("2006-01-02 15:04:05")
 		lastModified := info.ModTime().Format("2006-01-02 15:04:05")
 		lastModifiedTS := info.ModTime().Unix()
 
@@ -172,7 +175,6 @@ func ScanLocalDisk(ctx context.Context, startPath string, activeRules []rules.Ru
 			backupFiles = append(backupFiles, fileInfo)
 		}
 
-		// Large files
 		if size > 100*1024*1024 {
 			if fileInfo.Category == "other" {
 				fileInfo.Category = "large"
@@ -180,8 +182,8 @@ func ScanLocalDisk(ctx context.Context, startPath string, activeRules []rules.Ru
 			largeFiles = append(largeFiles, fileInfo)
 		}
 
-		// Group for duplicates
-		if size > 1*1024*1024 { // Only files > 1 MB
+		// Group for duplicates (files > 1 MB)
+		if size > 1*1024*1024 {
 			sizeGroups[size] = append(sizeGroups[size], path)
 		}
 
@@ -196,7 +198,7 @@ func ScanLocalDisk(ctx context.Context, startPath string, activeRules []rules.Ru
 		return ScanResults{Cancelled: true}, nil
 	}
 
-	// Duplicates matching: prefix hash -> full hash
+	// Duplicates matching: parallel processing
 	duplicateGroups := make(map[string][]DuplicateFileInfo)
 
 	totalGroups := 0
@@ -206,60 +208,82 @@ func ScanLocalDisk(ctx context.Context, startPath string, activeRules []rules.Ru
 		}
 	}
 
-	currentGroup := 0
-	lastEmitTime = time.Now()
+	var currentGroup int32 = 0
+	var mu sync.Mutex
+
+	g, gCtx := errgroup.WithContext(ctx)
+	// Limit concurrency for duplicate hashing to avoid too many open files
+	sem := make(chan struct{}, runtime.NumCPU()*2)
 
 	for size, paths := range sizeGroups {
-		select {
-		case <-ctx.Done():
-			return ScanResults{Cancelled: true}, nil
-		default:
-		}
-
+		size := size
+		paths := paths
 		if len(paths) > 1 {
-			currentGroup++
-			if time.Since(lastEmitTime) > 200*time.Millisecond || currentGroup == 1 || currentGroup == totalGroups {
-				progressCallback(fmt.Sprintf("Аналіз дублікатів (%d/%d)...", currentGroup, totalGroups), filesScanned, totalSize)
-				lastEmitTime = time.Now()
-			}
-			// Group by prefix hash
-			prefixGroups := make(map[string][]string)
-			for _, p := range paths {
-				h, err := getPrefixHash(p)
-				if err != nil {
-					continue
+			g.Go(func() error {
+				select {
+				case <-gCtx.Done():
+					return gCtx.Err()
+				default:
 				}
-				prefixGroups[h] = append(prefixGroups[h], p)
-			}
 
-			// Group by full hash
-			for _, collidingPaths := range prefixGroups {
-				if len(collidingPaths) > 1 {
-					fullGroups := make(map[string][]string)
-					for _, p := range collidingPaths {
-						h, err := getFastHash(ctx, p)
-						if err != nil {
-							continue
-						}
-						fullGroups[h] = append(fullGroups[h], p)
+				sem <- struct{}{}
+				defer func() { <-sem }()
+
+				cg := atomic.AddInt32(&currentGroup, 1)
+				if cg%10 == 0 || cg == 1 || int(cg) == totalGroups {
+					progressCallback(fmt.Sprintf("Аналіз дублікатів (%d/%d)...", cg, totalGroups), filesScanned, totalSize)
+				}
+
+				// Group by prefix hash
+				prefixGroups := make(map[string][]string)
+				for _, p := range paths {
+					h, err := getPrefixHash(p)
+					if err != nil {
+						continue
 					}
+					prefixGroups[h] = append(prefixGroups[h], p)
+				}
 
-					for h, dupPaths := range fullGroups {
-						if len(dupPaths) > 1 {
-							dups := make([]DuplicateFileInfo, 0)
-							for _, p := range dupPaths {
-								dups = append(dups, DuplicateFileInfo{
-									Path:          p,
-									Size:          size,
-									SizeFormatted: FormatSize(size),
-								})
+				// Group by full hash
+				for _, collidingPaths := range prefixGroups {
+					if len(collidingPaths) > 1 {
+						fullGroups := make(map[string][]string)
+						for _, p := range collidingPaths {
+							h, err := getFastHash(gCtx, p)
+							if err != nil {
+								continue
 							}
-							duplicateGroups[h] = dups
+							fullGroups[h] = append(fullGroups[h], p)
+						}
+
+						for h, dupPaths := range fullGroups {
+							if len(dupPaths) > 1 {
+								dups := make([]DuplicateFileInfo, 0, len(dupPaths))
+								for _, p := range dupPaths {
+									dups = append(dups, DuplicateFileInfo{
+										Path:          p,
+										Size:          size,
+										SizeFormatted: FormatSize(size),
+									})
+								}
+								mu.Lock()
+								duplicateGroups[h] = dups
+								mu.Unlock()
+							}
 						}
 					}
 				}
-			}
+				return nil
+			})
 		}
+	}
+
+	if err := g.Wait(); err != nil && err != context.Canceled {
+		return ScanResults{}, err
+	}
+
+	if ctx.Err() == context.Canceled {
+		return ScanResults{Cancelled: true}, nil
 	}
 
 	// Calculate SRE data (Windows)
@@ -281,13 +305,14 @@ func ScanLocalDisk(ctx context.Context, startPath string, activeRules []rules.Ru
 	// Apply rules engine logic to flag files
 	results = rules.ProcessRules(results, activeRules)
 
-	// Sort and limit file lists by size descending to prevent UI rendering hangs and reduce IPC payload size
-	results.LargeFiles = sortAndLimitFiles(results.LargeFiles, 200)
-	results.TempFiles = sortAndLimitFiles(results.TempFiles, 200)
-	results.LogFiles = sortAndLimitFiles(results.LogFiles, 200)
-	results.BackupFiles = sortAndLimitFiles(results.BackupFiles, 200)
-	results.CacheFiles = sortAndLimitFiles(results.CacheFiles, 200)
-	results.DuplicateGroups = limitDuplicateGroups(results.DuplicateGroups, 200)
+	// Sort and limit file lists by size descending to prevent IPC payload size explosion
+	// But let's increase limits compared to previous version to show more data
+	results.LargeFiles = sortAndLimitFiles(results.LargeFiles, 1000)
+	results.TempFiles = sortAndLimitFiles(results.TempFiles, 1000)
+	results.LogFiles = sortAndLimitFiles(results.LogFiles, 1000)
+	results.BackupFiles = sortAndLimitFiles(results.BackupFiles, 1000)
+	results.CacheFiles = sortAndLimitFiles(results.CacheFiles, 1000)
+	results.DuplicateGroups = limitDuplicateGroups(results.DuplicateGroups, 500)
 
 	return results, nil
 }
@@ -346,8 +371,8 @@ func getPrefixHash(filePath string) (string, error) {
 		return "", err
 	}
 
-	h := md5.Sum(buf[:n])
-	return hex.EncodeToString(h[:]), nil
+	h := xxhash.Sum64(buf[:n])
+	return fmt.Sprintf("%016x", h), nil
 }
 
 func getFastHash(ctx context.Context, filePath string) (string, error) {
@@ -363,7 +388,7 @@ func getFastHash(ctx context.Context, filePath string) (string, error) {
 	}
 	size := info.Size()
 
-	h := md5.New()
+	h := xxhash.New()
 
 	const portionSize = 1024 * 1024 // 1 MB
 
@@ -410,5 +435,6 @@ func getFastHash(ctx context.Context, filePath string) (string, error) {
 		h.Write(lastBuf)
 	}
 
-	return hex.EncodeToString(h.Sum(nil)), nil
+	return fmt.Sprintf("%016x", h.Sum64()), nil
 }
+

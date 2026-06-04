@@ -3,9 +3,11 @@ module aisadvisor
 go 1.25.0
 
 require (
+	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/shirou/gopsutil/v3 v3.24.5
 	github.com/wailsapp/wails/v2 v2.12.0
 	golang.org/x/crypto v0.52.0
+	golang.org/x/sync v0.20.0
 	modernc.org/sqlite v1.51.0
 )
 

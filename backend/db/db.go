@@ -77,6 +77,7 @@ func createTables() {
 			username TEXT NOT NULL,
 			auth_type TEXT NOT NULL,      -- 'password', 'key'
 			credentials TEXT,             -- Encrypted password or key path
+			key_passphrase TEXT DEFAULT '',
 			FOREIGN KEY (profile_id) REFERENCES profiles(id) ON DELETE CASCADE
 		);`,
 		`CREATE TABLE IF NOT EXISTS scan_history (
@@ -141,6 +142,10 @@ func createTables() {
 			log.Fatalf("Failed to execute DB setup query: %v\nQuery: %s", err, q)
 		}
 	}
+
+	// Migrations
+	_, _ = DB.Exec(`ALTER TABLE ssh_hosts ADD COLUMN key_passphrase TEXT DEFAULT ''`)
+
 	log.Println("Database schema checked and verified.")
 }
 

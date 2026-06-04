@@ -1034,6 +1034,16 @@ async function loadAIProviders() {
         } else {
             renderAIProviderFormFields('ollama');
         }
+
+        try {
+            const lang = await window.go.main.App.GetSetting('ai_language');
+            if (lang) {
+                document.getElementById('select-ai-language').value = lang;
+            }
+        } catch (e) {
+            console.error("Failed to load AI Language:", e);
+        }
+
     } catch (err) {
         console.error("AI load failed:", err);
     }
@@ -1118,6 +1128,7 @@ async function saveAIProviderConfiguration() {
     const key = document.getElementById('input-ai-key').value.trim();
     const model = document.getElementById('select-ai-model').value;
     const temp = parseFloat(document.getElementById('input-ai-temp').value) || 0.7;
+    const lang = document.getElementById('select-ai-language').value || 'Ukrainian';
 
     if (!model) {
         alert('Помилка: Будь ласка, оберіть модель перед збереженням!');
@@ -1133,6 +1144,7 @@ async function saveAIProviderConfiguration() {
 
     try {
         await SaveAIProvider(type, type, JSON.stringify(config), 1);
+        await window.go.main.App.SaveSetting('ai_language', lang);
         alert('Налаштування провайдера ШІ збережено!');
         loadAIProviders();
     } catch (err) {

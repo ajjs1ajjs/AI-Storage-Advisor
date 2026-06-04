@@ -6,7 +6,7 @@ import {forecast} from '../models';
 import {providers} from '../models';
 import {main} from '../models';
 
-export function AddSSHHost(arg1:string,arg2:string,arg3:number,arg4:string,arg5:string,arg6:string):Promise<void>;
+export function AddSSHHost(arg1:string,arg2:string,arg3:number,arg4:string,arg5:string,arg6:string,arg7:string):Promise<void>;
 
 export function BrowseFolder():Promise<string>;
 
@@ -20,7 +20,7 @@ export function DeleteSSHHost(arg1:number):Promise<void>;
 
 export function DryRunCleanup(arg1:Array<string>):Promise<cleanup.DryRunResult>;
 
-export function EditSSHHost(arg1:number,arg2:string,arg3:string,arg4:number,arg5:string,arg6:string,arg7:string):Promise<void>;
+export function EditSSHHost(arg1:number,arg2:string,arg3:string,arg4:number,arg5:string,arg6:string,arg7:string,arg8:string):Promise<void>;
 
 export function GenerateAIRecommendation(arg1:string,arg2:Array<scanner.FileInfo>):Promise<string>;
 
@@ -34,6 +34,8 @@ export function GetSSHHosts():Promise<Array<Record<string, any>>>;
 
 export function GetScanRules():Promise<string>;
 
+export function GetSetting(arg1:string):Promise<string>;
+
 export function GetStorageForecast(arg1:string):Promise<forecast.ForecastResult>;
 
 export function GetTheme():Promise<string>;
@@ -45,6 +47,8 @@ export function SafeDeleteFiles(arg1:Array<string>,arg2:boolean):Promise<void>;
 export function SaveAIProvider(arg1:string,arg2:string,arg3:string,arg4:number):Promise<void>;
 
 export function SaveScanRules(arg1:string):Promise<void>;
+
+export function SaveSetting(arg1:string,arg2:string):Promise<void>;
 
 export function SaveTheme(arg1:string):Promise<void>;
 

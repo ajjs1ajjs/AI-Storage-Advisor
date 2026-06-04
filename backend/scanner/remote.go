@@ -18,7 +18,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-func ConnectSSH(host string, port int, username string, authType string, credentials string) (*ssh.Client, error) {
+func ConnectSSH(host string, port int, username string, authType string, credentials string, keyPassphrase string) (*ssh.Client, error) {
 	var authMethod ssh.AuthMethod
 
 	if authType == "password" {
@@ -30,9 +30,14 @@ func ConnectSSH(host string, port int, username string, authType string, credent
 			return nil, fmt.Errorf("failed to read private key file: %w", err)
 		}
 
-		signer, err := ssh.ParsePrivateKey(keyBytes)
+		var signer ssh.Signer
+		if keyPassphrase != "" {
+			signer, err = ssh.ParsePrivateKeyWithPassphrase(keyBytes, []byte(keyPassphrase))
+		} else {
+			signer, err = ssh.ParsePrivateKey(keyBytes)
+		}
+		
 		if err != nil {
-			// Check if key is passphrase encrypted (unsupported directly without passphrase input, return error)
 			return nil, fmt.Errorf("failed to parse private key (if it is encrypted, passphrase is required): %w", err)
 		}
 		authMethod = ssh.PublicKeys(signer)
@@ -54,8 +59,8 @@ func ConnectSSH(host string, port int, username string, authType string, credent
 	return client, nil
 }
 
-func TestSSHConnection(host string, port int, username string, authType string, credentials string) (bool, string) {
-	client, err := ConnectSSH(host, port, username, authType, credentials)
+func TestSSHConnection(host string, port int, username string, authType string, credentials string, keyPassphrase string) (bool, string) {
+	client, err := ConnectSSH(host, port, username, authType, credentials, keyPassphrase)
 	if err != nil {
 		return false, err.Error()
 	}
@@ -83,9 +88,10 @@ func ScanRemoteSSH(ctx context.Context, hostConfig map[string]interface{}, targe
 	username := hostConfig["username"].(string)
 	authType := hostConfig["auth_type"].(string)
 	credentials := hostConfig["credentials"].(string)
+	keyPassphrase := hostConfig["key_passphrase"].(string)
 
 	progressCallback("Connecting via SSH...", 0, 0)
-	client, err := ConnectSSH(host, port, username, authType, credentials)
+	client, err := ConnectSSH(host, port, username, authType, credentials, keyPassphrase)
 	if err != nil {
 		return ScanResults{Cancelled: false}, fmt.Errorf("SSH Connection Error: %w", err)
 	}
@@ -352,9 +358,6 @@ func ScanRemoteSSH(ctx context.Context, hostConfig map[string]interface{}, targe
 	// Apply rules engine
 	results = rules.ProcessRules(results, activeRules)
 
-	// Inject remote partition capacity metadata
-	// We'll write a wrapper to return these fields over Wails methods
-	// We can save metadata in a custom way or in returning JSON map
 	return results, nil
 }
 
@@ -451,7 +454,7 @@ func AnalyzeRemoteDocker(client *ssh.Client) sre.SreReport {
 
 func AnalyzeRemotePackageCaches(client *ssh.Client) []sre.PackageCacheInfo {
 	caches := make([]sre.PackageCacheInfo, 0)
-	cmd := "du -sb /var/cache/apt/archives /var/cache/dnf /var/cache/yum ~/.npm ~/.cache/pip 2>/dev/null"
+	cmd := "du -sb /var/cache/apt/archives /var/cache/dnf /var/cache/yum ~/.npm ~/.cache/pip /var/cache/pacman/pkg /var/cache/zypp/packages ~/.cargo/registry/cache ~/.cache/go-build 2>/dev/null"
 	out, err := RunSSHCommand(client, cmd)
 	if err != nil {
 		return caches
@@ -481,12 +484,24 @@ func AnalyzeRemotePackageCaches(client *ssh.Client) []sre.PackageCacheInfo {
 		} else if strings.Contains(p, "dnf") || strings.Contains(p, "yum") {
 			name = "yum/dnf (RHEL/CentOS Cache)"
 			cleanCmd = "sudo dnf clean all || sudo yum clean all"
+		} else if strings.Contains(p, "pacman") {
+			name = "pacman (Arch Cache)"
+			cleanCmd = "sudo pacman -Scc --noconfirm || pacman -Scc --noconfirm"
+		} else if strings.Contains(p, "zypp") {
+			name = "zypper (openSUSE Cache)"
+			cleanCmd = "sudo zypper clean -a || zypper clean -a"
 		} else if strings.Contains(p, ".npm") {
 			name = "npm (Node.js Cache)"
 			cleanCmd = "npm cache clean --force"
 		} else if strings.Contains(p, "pip") {
 			name = "pip (Python Cache)"
 			cleanCmd = "pip cache purge"
+		} else if strings.Contains(p, "cargo") {
+			name = "cargo (Rust Cache)"
+			cleanCmd = "rm -rf ~/.cargo/registry/cache/*"
+		} else if strings.Contains(p, "go-build") {
+			name = "go mod (Go Cache)"
+			cleanCmd = "go clean -cache -modcache"
 		}
 
 		if name != "" && sizeVal > 0 {
