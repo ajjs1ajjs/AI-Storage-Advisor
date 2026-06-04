@@ -837,11 +837,7 @@ async function generateAIRecommendation() {
         chatBrowser.innerHTML = `<div class="chat-bubble assistant">${renderMarkdown(rec)}</div>`;
         document.getElementById('ai-chat-input-bar').classList.remove('hidden');
         
-        if (connType === 'SSH Remote Linux') {
-            bulkDeleteBtn.classList.add('hidden');
-        } else {
-            bulkDeleteBtn.classList.remove('hidden');
-        }
+        updateBulkDeleteButtonVisibility();
 
         // Scroll chat to bottom
         chatBrowser.scrollTop = chatBrowser.scrollHeight;
@@ -920,12 +916,26 @@ async function sendAIChatMessage() {
         const response = await QueryAIChat(state.chatHistory);
         state.chatHistory.push({ role: 'assistant', content: response });
         chatBrowser.innerHTML += `<div class="chat-bubble assistant">${renderMarkdown(response)}</div>`;
+        updateBulkDeleteButtonVisibility();
     } catch (err) {
         chatBrowser.innerHTML += `<div class="chat-bubble assistant text-danger">⚠️ Помилка ШІ: ${err.message || err}</div>`;
     } finally {
         sendBtn.removeAttribute('disabled');
         sendBtn.innerText = 'Надіслати';
         chatBrowser.scrollTop = chatBrowser.scrollHeight;
+    }
+}
+
+function updateBulkDeleteButtonVisibility() {
+    const connType = document.getElementById('select-conn-type').value;
+    const bulkDeleteBtn = document.getElementById('btn-bulk-delete-ai');
+    const chatBrowser = document.getElementById('ai-chat-browser');
+    const links = chatBrowser.querySelectorAll('a.delete-link');
+
+    if (connType === 'SSH Remote Linux' || links.length === 0) {
+        bulkDeleteBtn.classList.add('hidden');
+    } else {
+        bulkDeleteBtn.classList.remove('hidden');
     }
 }
 
