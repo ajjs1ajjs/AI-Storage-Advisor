@@ -167,7 +167,13 @@
 
                             <!-- DevOps SRE Info Card -->
                             <div class="card sre-card hidden" id="devops-sre-card">
-                                <h3>📊 DevOps SRE Аналітика (Docker)</h3>
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                                    <h3>📊 DevOps SRE Аналітика (Docker)</h3>
+                                    <div>
+                                        <button class="btn btn-secondary btn-sm" onclick="pruneDockerSystem(event)">🐳 Prune Docker</button>
+                                        <button class="btn btn-secondary btn-sm" onclick="vacuumJournaldLogs(event)">🧹 Vacuum Journald</button>
+                                    </div>
+                                </div>
                                 <div class="sre-section">
                                     <h4>Контейнери Docker (Write-Layers)</h4>
                                     <div class="table-container">

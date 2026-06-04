@@ -459,17 +459,112 @@ func (a *App) CancelScan() {
 }
 
 // DryRunCleanup checks file sizes and write access
-func (a *App) DryRunCleanup(filePaths []string) (cleanup.DryRunResult, error) {
+func (a *App) DryRunCleanup(connType string, hostID int, filePaths []string) (cleanup.DryRunResult, error) {
+	if connType == "SSH Remote Linux" {
+		// For SSH, we do a simplistic mock dry-run. We assume all files are writable since we'll run rm -f.
+		writableFiles := make([]map[string]interface{}, 0)
+		for _, p := range filePaths {
+			writableFiles = append(writableFiles, map[string]interface{}{
+				"path": p,
+				"size": int64(0),
+			})
+		}
+		return cleanup.DryRunResult{
+			TotalCount:         len(filePaths),
+			TotalSize:          0,
+			TotalSizeFormatted: "Unknown (SSH)",
+			WritableFiles:      writableFiles,
+			RestrictedFiles:    []map[string]interface{}{},
+			CanProceed:         len(writableFiles) > 0,
+		}, nil
+	}
 	return cleanup.DryRun(filePaths), nil
 }
 
 // SafeDeleteFiles processes file list and sends updates
-func (a *App) SafeDeleteFiles(filePaths []string, useRecycleBin bool) {
+func (a *App) SafeDeleteFiles(connType string, hostID int, filePaths []string, useRecycleBin bool) {
 	go func() {
 		var deletedCount int
 		var sizeFreed int64
 		var failedPaths []map[string]interface{}
 
+		if connType == "SSH Remote Linux" {
+			var host, username, authType, credentials, keyPassphrase string
+			var port int
+			errHost := db.DB.QueryRow("SELECT host, port, username, auth_type, credentials, key_passphrase FROM ssh_hosts WHERE id = ? AND profile_id = ?", hostID, a.profileID).Scan(&host, &port, &username, &authType, &credentials, &keyPassphrase)
+			if errHost != nil {
+				runtime.EventsEmit(a.ctx, "delete:finished", map[string]interface{}{
+					"deleted_count":        0,
+					"size_freed":          0,
+					"size_freed_formatted": "0 B",
+					"failed_paths":         []map[string]interface{}{{"path": "SSH", "error": "Host not found"}},
+				})
+				return
+			}
+			decCredentials := ""
+			if credentials != "" {
+				decCredentials, _ = security.Decrypt(credentials)
+			}
+			client, err := scanner.ConnectSSH(host, port, username, authType, decCredentials, keyPassphrase)
+			if err != nil {
+				runtime.EventsEmit(a.ctx, "delete:finished", map[string]interface{}{
+					"deleted_count":        0,
+					"size_freed":          0,
+					"size_freed_formatted": "0 B",
+					"failed_paths":         []map[string]interface{}{{"path": "SSH", "error": err.Error()}},
+				})
+				return
+			}
+			defer client.Close()
+
+			// Batch delete via SSH
+			batchSize := 50
+			for i := 0; i < len(filePaths); i += batchSize {
+				end := i + batchSize
+				if end > len(filePaths) {
+					end = len(filePaths)
+				}
+				batch := filePaths[i:end]
+
+				escapedBatch := make([]string, len(batch))
+				for j, p := range batch {
+					escapedBatch[j] = fmt.Sprintf("'%s'", p)
+				}
+
+				runtime.EventsEmit(a.ctx, "delete:progress", map[string]interface{}{
+					"current_index": i,
+					"total_files":   len(filePaths),
+					"current_file":  fmt.Sprintf("Batch SSH delete %d-%d", i, end),
+				})
+
+				rmCmd := fmt.Sprintf("rm -f %s", strings.Join(escapedBatch, " "))
+				_, errCmd := scanner.RunSSHCommand(client, rmCmd)
+				if errCmd != nil {
+					for _, p := range batch {
+						failedPaths = append(failedPaths, map[string]interface{}{
+							"path":  p,
+							"error": errCmd.Error(),
+						})
+					}
+				} else {
+					deletedCount += len(batch)
+					for _, p := range batch {
+						// Log success in DB with 0 size
+						_, _ = db.DB.Exec("INSERT INTO cleanup_history (profile_id, cleaned_path, size_freed, status) VALUES (?, ?, ?, 'success')", a.profileID, p, 0)
+					}
+				}
+			}
+
+			runtime.EventsEmit(a.ctx, "delete:finished", map[string]interface{}{
+				"deleted_count":        deletedCount,
+				"size_freed":          0,
+				"size_freed_formatted": "Unknown (SSH)",
+				"failed_paths":         failedPaths,
+			})
+			return
+		}
+
+		// Local deletion logic
 		for idx, p := range filePaths {
 			runtime.EventsEmit(a.ctx, "delete:progress", map[string]interface{}{
 				"current_index": idx,
@@ -635,6 +730,71 @@ func (a *App) ClearPackageCache(connType string, hostID int, cleanCmd string, ca
 		return cmd.Run()
 	}
 }
+
+// PruneDockerSystem runs docker system prune
+func (a *App) PruneDockerSystem(connType string, hostID int) error {
+	cmdStr := "docker system prune -af --volumes"
+	if connType == "SSH Remote Linux" {
+		var host, username, authType, credentials, keyPassphrase string
+		var port int
+		errHost := db.DB.QueryRow("SELECT host, port, username, auth_type, credentials, key_passphrase FROM ssh_hosts WHERE id = ? AND profile_id = ?", hostID, a.profileID).Scan(&host, &port, &username, &authType, &credentials, &keyPassphrase)
+		if errHost != nil {
+			return errHost
+		}
+		decCredentials := ""
+		if credentials != "" {
+			decCredentials, _ = security.Decrypt(credentials)
+		}
+		client, err := scanner.ConnectSSH(host, port, username, authType, decCredentials, keyPassphrase)
+		if err != nil {
+			return err
+		}
+		defer client.Close()
+
+		_, errCmd := scanner.RunSSHCommand(client, "sudo "+cmdStr+" || "+cmdStr)
+		return errCmd
+	}
+
+	// Local
+	cmd := exec.Command("docker", "system", "prune", "-af", "--volumes")
+	return cmd.Run()
+}
+
+// VacuumJournaldLogs clears old journald logs
+func (a *App) VacuumJournaldLogs(connType string, hostID int) error {
+	cmdStr := "journalctl --vacuum-time=3d"
+	if connType == "SSH Remote Linux" {
+		var host, username, authType, credentials, keyPassphrase string
+		var port int
+		errHost := db.DB.QueryRow("SELECT host, port, username, auth_type, credentials, key_passphrase FROM ssh_hosts WHERE id = ? AND profile_id = ?", hostID, a.profileID).Scan(&host, &port, &username, &authType, &credentials, &keyPassphrase)
+		if errHost != nil {
+			return errHost
+		}
+		decCredentials := ""
+		if credentials != "" {
+			decCredentials, _ = security.Decrypt(credentials)
+		}
+		client, err := scanner.ConnectSSH(host, port, username, authType, decCredentials, keyPassphrase)
+		if err != nil {
+			return err
+		}
+		defer client.Close()
+
+		_, errCmd := scanner.RunSSHCommand(client, "sudo "+cmdStr+" || "+cmdStr)
+		return errCmd
+	}
+
+	// Local
+	var cmd *exec.Cmd
+	if goRuntime.GOOS == "windows" {
+		// Not applicable to Windows
+		return errors.New("Journald vacuum is not applicable to Windows")
+	} else {
+		cmd = exec.Command("sudo", "journalctl", "--vacuum-time=3d")
+	}
+	return cmd.Run()
+}
+
 
 // GetStorageForecast runs chronological size regression
 func (a *App) GetStorageForecast(scanPath string) (forecast.ForecastResult, error) {

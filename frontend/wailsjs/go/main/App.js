@@ -26,8 +26,8 @@ export function DeleteSSHHost(arg1) {
   return window['go']['main']['App']['DeleteSSHHost'](arg1);
 }
 
-export function DryRunCleanup(arg1) {
-  return window['go']['main']['App']['DryRunCleanup'](arg1);
+export function DryRunCleanup(arg1, arg2, arg3) {
+  return window['go']['main']['App']['DryRunCleanup'](arg1, arg2, arg3);
 }
 
 export function EditSSHHost(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8) {
@@ -70,12 +70,16 @@ export function GetTheme() {
   return window['go']['main']['App']['GetTheme']();
 }
 
+export function PruneDockerSystem(arg1, arg2) {
+  return window['go']['main']['App']['PruneDockerSystem'](arg1, arg2);
+}
+
 export function QueryAIChat(arg1) {
   return window['go']['main']['App']['QueryAIChat'](arg1);
 }
 
-export function SafeDeleteFiles(arg1, arg2) {
-  return window['go']['main']['App']['SafeDeleteFiles'](arg1, arg2);
+export function SafeDeleteFiles(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['SafeDeleteFiles'](arg1, arg2, arg3, arg4);
 }
 
 export function SaveAIProvider(arg1, arg2, arg3, arg4) {
@@ -100,4 +104,8 @@ export function StartScan(arg1, arg2, arg3) {
 
 export function TestAIProviderConnection(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['main']['App']['TestAIProviderConnection'](arg1, arg2, arg3, arg4, arg5);
+}
+
+export function VacuumJournaldLogs(arg1, arg2) {
+  return window['go']['main']['App']['VacuumJournaldLogs'](arg1, arg2);
 }

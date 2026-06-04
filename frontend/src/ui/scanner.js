@@ -446,7 +446,11 @@ export async function showDeleteConfirmationModal() {
     const executeBtn = document.getElementById('btn-delete-execute');
 
     try {
-        const dryRun = await api.DryRunCleanup(state.deletePathsQueue);
+        const connType = document.getElementById('select-conn-type').value;
+        const hostDropdown = document.getElementById('select-ssh-server');
+        const hostID = parseInt(hostDropdown.value) || 0;
+        
+        const dryRun = await api.DryRunCleanup(connType, hostID, state.deletePathsQueue);
         
         countEl.innerText = dryRun.writable_files.length;
         sizeEl.innerText = dryRun.total_size_formatted;
@@ -484,7 +488,11 @@ export function executeDeletionsQueue() {
     document.getElementById('delete-progress-fill').style.width = '0%';
     document.getElementById('delete-progress-file-text').innerText = 'Підготовка до видалення...';
 
-    api.SafeDeleteFiles(state.deletePathsQueue, useRecycleBin);
+    const connType = document.getElementById('select-conn-type').value;
+    const hostDropdown = document.getElementById('select-ssh-server');
+    const hostID = parseInt(hostDropdown.value) || 0;
+
+    api.SafeDeleteFiles(connType, hostID, state.deletePathsQueue, useRecycleBin);
 }
 
 export async function generateAIRecommendation() {
@@ -643,6 +651,54 @@ window.clearPackageCache = async function(connType, hostID, cleanCmd, cachePath,
     }
 };
 
+window.pruneDockerSystem = async function(e) {
+    const btn = e ? e.currentTarget : null;
+    const oldText = btn ? btn.innerText : '';
+    if (btn) {
+        btn.setAttribute('disabled', 'true');
+        btn.innerText = '⏳';
+    }
+    try {
+        const connType = document.getElementById('select-conn-type').value;
+        const hostDropdown = document.getElementById('select-ssh-server');
+        const hostID = parseInt(hostDropdown.value) || 0;
+        
+        await api.PruneDockerSystem(connType, hostID);
+        alert('Docker System Prune виконано успішно!');
+    } catch (err) {
+        alert('Помилка виконання Prune Docker: ' + err);
+    } finally {
+        if (btn) {
+            btn.removeAttribute('disabled');
+            btn.innerText = oldText;
+        }
+    }
+};
+
+window.vacuumJournaldLogs = async function(e) {
+    const btn = e ? e.currentTarget : null;
+    const oldText = btn ? btn.innerText : '';
+    if (btn) {
+        btn.setAttribute('disabled', 'true');
+        btn.innerText = '⏳';
+    }
+    try {
+        const connType = document.getElementById('select-conn-type').value;
+        const hostDropdown = document.getElementById('select-ssh-server');
+        const hostID = parseInt(hostDropdown.value) || 0;
+        
+        await api.VacuumJournaldLogs(connType, hostID);
+        alert('Journald Logs успішно очищено (залишено останні 3 дні)!');
+    } catch (err) {
+        alert('Помилка очищення Journald Logs: ' + err);
+    } finally {
+        if (btn) {
+            btn.removeAttribute('disabled');
+            btn.innerText = oldText;
+        }
+    }
+};
+
 export async function sendAIChatMessage() {
     const input = document.getElementById('input-ai-chat');
     const message = input.value.trim();
@@ -680,7 +736,7 @@ export function updateBulkDeleteButtonVisibility() {
     const chatBrowser = document.getElementById('ai-chat-browser');
     const links = chatBrowser.querySelectorAll('a.delete-link');
 
-    if (connType === 'SSH Remote Linux' || links.length === 0) {
+    if (links.length === 0) {
         bulkDeleteBtn.classList.add('hidden');
     } else {
         bulkDeleteBtn.classList.remove('hidden');

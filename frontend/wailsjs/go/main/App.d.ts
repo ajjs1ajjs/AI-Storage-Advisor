@@ -18,7 +18,7 @@ export function ClearPackageCache(arg1:string,arg2:number,arg3:string,arg4:strin
 
 export function DeleteSSHHost(arg1:number):Promise<void>;
 
-export function DryRunCleanup(arg1:Array<string>):Promise<cleanup.DryRunResult>;
+export function DryRunCleanup(arg1:string,arg2:number,arg3:Array<string>):Promise<cleanup.DryRunResult>;
 
 export function EditSSHHost(arg1:number,arg2:string,arg3:string,arg4:number,arg5:string,arg6:string,arg7:string,arg8:string):Promise<void>;
 
@@ -40,9 +40,11 @@ export function GetStorageForecast(arg1:string):Promise<forecast.ForecastResult>
 
 export function GetTheme():Promise<string>;
 
+export function PruneDockerSystem(arg1:string,arg2:number):Promise<void>;
+
 export function QueryAIChat(arg1:Array<providers.ChatMessage>):Promise<string>;
 
-export function SafeDeleteFiles(arg1:Array<string>,arg2:boolean):Promise<void>;
+export function SafeDeleteFiles(arg1:string,arg2:number,arg3:Array<string>,arg4:boolean):Promise<void>;
 
 export function SaveAIProvider(arg1:string,arg2:string,arg3:string,arg4:number):Promise<void>;
 
@@ -55,3 +57,5 @@ export function SaveTheme(arg1:string):Promise<void>;
 export function StartScan(arg1:string,arg2:number,arg3:string):Promise<string>;
 
 export function TestAIProviderConnection(arg1:string,arg2:string,arg3:string,arg4:string,arg5:number):Promise<main.ConnectionResult>;
+
+export function VacuumJournaldLogs(arg1:string,arg2:number):Promise<void>;
