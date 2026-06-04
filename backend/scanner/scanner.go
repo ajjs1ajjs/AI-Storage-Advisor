@@ -90,29 +90,19 @@ func ScanLocalDisk(ctx context.Context, startPath string, activeRules []rules.Ru
 		}
 
 		if err != nil {
-			// Skip directories/files with access denied errors
-			return filepath.SkipDir
-		}
-
-		if d.IsDir() {
-			nameLower := strings.ToLower(d.Name())
-			// Skip junctions, common system folders, and heavy developer dependencies
-			if nameLower == "$recycle.bin" || nameLower == "system volume information" ||
-				nameLower == ".git" || nameLower == "node_modules" ||
-				nameLower == ".venv" || nameLower == "venv" ||
-				nameLower == "__pycache__" || nameLower == ".idea" || nameLower == ".vscode" {
+			// Skip directories with access denied errors, but do not skip the rest of the parent directory if a file has an error
+			if d != nil && d.IsDir() {
 				return filepath.SkipDir
 			}
-
-			// If scanning a drive root, skip Windows, Program Files, Library, System, ProgramData to avoid locked/system files
-			cleanStart := filepath.Clean(startPath)
-			parentDir := filepath.Clean(filepath.Dir(path))
-			if parentDir == cleanStart {
-				if nameLower == "windows" || nameLower == "program files" || nameLower == "program files (x86)" || nameLower == "library" || nameLower == "system" || nameLower == "programdata" || nameLower == "msocache" || nameLower == "recovery" {
+			if d == nil {
+				if fi, statErr := os.Lstat(path); statErr == nil && fi.IsDir() {
 					return filepath.SkipDir
 				}
 			}
+			return nil
+		}
 
+		if d.IsDir() {
 			return nil
 		}
 
