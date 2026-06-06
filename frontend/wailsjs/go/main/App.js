@@ -10,8 +10,16 @@ export function BrowseFolder() {
   return window['go']['main']['App']['BrowseFolder']();
 }
 
+export function CalculateHealthScore(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['App']['CalculateHealthScore'](arg1, arg2, arg3, arg4, arg5);
+}
+
 export function CancelScan() {
   return window['go']['main']['App']['CancelScan']();
+}
+
+export function ChangeMasterPassword(arg1, arg2) {
+  return window['go']['main']['App']['ChangeMasterPassword'](arg1, arg2);
 }
 
 export function ClearContainerLogs(arg1, arg2, arg3) {
@@ -36,6 +44,10 @@ export function DryRunCleanup(arg1, arg2, arg3) {
 
 export function EditSSHHost(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8) {
   return window['go']['main']['App']['EditSSHHost'](arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8);
+}
+
+export function ExportProfile(arg1, arg2) {
+  return window['go']['main']['App']['ExportProfile'](arg1, arg2);
 }
 
 export function GenerateAIRecommendation(arg1, arg2) {
@@ -74,6 +86,26 @@ export function GetTheme() {
   return window['go']['main']['App']['GetTheme']();
 }
 
+export function ImportProfile(arg1, arg2) {
+  return window['go']['main']['App']['ImportProfile'](arg1, arg2);
+}
+
+export function InitializeVault(arg1) {
+  return window['go']['main']['App']['InitializeVault'](arg1);
+}
+
+export function IsVaultInitialized() {
+  return window['go']['main']['App']['IsVaultInitialized']();
+}
+
+export function IsVaultUnlocked() {
+  return window['go']['main']['App']['IsVaultUnlocked']();
+}
+
+export function LockVault() {
+  return window['go']['main']['App']['LockVault']();
+}
+
 export function PruneDockerSystem(arg1, arg2) {
   return window['go']['main']['App']['PruneDockerSystem'](arg1, arg2);
 }
@@ -108,6 +140,10 @@ export function StartScan(arg1, arg2, arg3) {
 
 export function TestAIProviderConnection(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['main']['App']['TestAIProviderConnection'](arg1, arg2, arg3, arg4, arg5);
+}
+
+export function UnlockVault(arg1) {
+  return window['go']['main']['App']['UnlockVault'](arg1);
 }
 
 export function VacuumJournaldLogs(arg1, arg2) {

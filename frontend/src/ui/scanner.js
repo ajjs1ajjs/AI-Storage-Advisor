@@ -2,6 +2,7 @@ import { state } from '../state.js';
 import * as api from '../api.js';
 import { escapeAttribute, escapeHtml, formatBytes, jsArg } from '../utils.js';
 import * as ssh from './ssh.js';
+import { CalculateHealthScore } from '../../wailsjs/go/main/App.js';
 import { EventsOn } from '../../wailsjs/runtime/runtime.js';
 
 export function onConnectionTypeChanged(type) {
@@ -268,31 +269,38 @@ export function renderScanResults(results) {
     }
 }
 
-export function renderSreHealthScore(results) {
-    const sreData = results.sre_data;
-    let dupWaste = 0;
-    if (results.duplicate_groups) {
-        Object.values(results.duplicate_groups).forEach(paths => {
-            if (paths.length > 1) {
-                dupWaste += (paths.length - 1) * paths[0].size;
-            }
-        });
-    }
+export async function renderSreHealthScore(results) {
+    try {
+        let dupWaste = 0;
+        if (results.duplicate_groups) {
+            Object.values(results.duplicate_groups).forEach(paths => {
+                if (paths.length > 1) {
+                    dupWaste += (paths.length - 1) * paths[0].size;
+                }
+            });
+        }
 
-    let logSize = 0;
-    if (results.log_files) {
-        results.log_files.forEach(f => logSize += f.size);
-    }
+        let logSize = 0;
+        if (results.log_files) {
+            results.log_files.forEach(f => logSize += f.size);
+        }
 
-    let tempSize = 0;
-    if (results.temp_files) {
-        results.temp_files.forEach(f => tempSize += f.size);
-    }
-    if (results.cache_files) {
-        results.cache_files.forEach(f => tempSize += f.size);
-    }
+        let tempSize = 0;
+        if (results.temp_files) {
+            results.temp_files.forEach(f => tempSize += f.size);
+        }
+        if (results.cache_files) {
+            results.cache_files.forEach(f => tempSize += f.size);
+        }
 
-    updateHealthRingUI(95, []); 
+        const totalSize = results.total_size || 0;
+        const sreDataJSON = JSON.stringify(results.sre_data || {});
+        const result = await CalculateHealthScore(totalSize, dupWaste, logSize, tempSize, sreDataJSON);
+        updateHealthRingUI(result.score, result.warnings || []);
+    } catch (err) {
+        console.error("Health score calculation failed:", err);
+        updateHealthRingUI(95, []);
+    }
 }
 
 export function updateHealthRingUI(score, warnings) {
@@ -323,49 +331,10 @@ export async function loadStorageExhaustionForecast() {
     try {
         const fc = await api.GetStorageForecast(scanPath);
         if (fc && fc.status !== 'insufficient_data') {
-            let dupWaste = 0;
-            if (state.scannedResults.duplicate_groups) {
-                Object.values(state.scannedResults.duplicate_groups).forEach(paths => {
-                    if (paths.length > 1) {
-                        dupWaste += (paths.length - 1) * paths[0].size;
-                    }
-                });
+            const fcText = document.getElementById('forecast-text');
+            if (fc.days_remaining >= 0) {
+                fcText.innerText = `Прогноз заповнення: ${fc.days_remaining} днів (${fc.growth_rate_formatted || ''}/день)`;
             }
-
-            let logSize = 0;
-            state.scannedResults.log_files.forEach(f => logSize += f.size);
-
-            let tempSize = 0;
-            state.scannedResults.temp_files.forEach(f => tempSize += f.size);
-
-            let score = 100;
-            let warnings = [];
-
-            if (fc.days_remaining != -1) {
-                if (fc.days_remaining < 30) {
-                    score -= 30;
-                    warnings.push(`Storage exhaustion projected in ${fc.days_remaining} days.`);
-                } else if (fc.days_remaining < 90) {
-                    score -= 15;
-                    warnings.push(`Storage exhaustion projected in ${fc.days_remaining} days.`);
-                }
-            }
-
-            if (dupWaste > 10*1024*1024*1024) score -= 15;
-            else if (dupWaste > 1*1024*1024*1024) score -= 8;
-
-            if (logSize > 5*1024*1024*1024) score -= 15;
-            else if (logSize > 500*1024*1024) score -= 5;
-
-            if (tempSize > 5*1024*1024*1024) score -= 10;
-
-            if (state.scannedResults.sre_data && state.scannedResults.sre_data.docker_active) {
-                let largeCount = state.scannedResults.sre_data.containers.filter(c => c.write_size > 1024*1024*1024).length;
-                if (largeCount > 0) score -= 10;
-            }
-
-            score = Math.max(0, Math.min(100, score));
-            updateHealthRingUI(score, warnings);
         }
     } catch (err) {
         console.error("Forecast failed:", err);
@@ -569,10 +538,11 @@ export async function generateAIRecommendation() {
     }
 
     try {
+        // Limit files sent to AI to reduce payload size
         const filesList = [
-            ...state.scannedResults.large_files,
-            ...state.scannedResults.temp_files,
-            ...state.scannedResults.log_files
+            ...(state.scannedResults.large_files || []).slice(0, 15),
+            ...(state.scannedResults.temp_files || []).slice(0, 15),
+            ...(state.scannedResults.log_files || []).slice(0, 15)
         ];
 
         const rec = await api.GenerateAIRecommendation(summary, filesList);

@@ -6,18 +6,23 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os/exec"
 	goRuntime "runtime"
+	"strconv"
 	"strings"
+	"sync"
 
 	"aisadvisor/backend/cleanup"
 	"aisadvisor/backend/config"
 	"aisadvisor/backend/db"
 	"aisadvisor/backend/forecast"
+	"aisadvisor/backend/profile"
 	"aisadvisor/backend/providers"
 	"aisadvisor/backend/rules"
 	"aisadvisor/backend/scanner"
 	"aisadvisor/backend/security"
+	"aisadvisor/backend/sre"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -28,15 +33,15 @@ type App struct {
 	profileID    int
 	userID       int
 	cancelScan   context.CancelFunc
-	activeScanCh chan bool
+	scanMu       sync.Mutex
+	scanWg       sync.WaitGroup
 }
 
 // NewApp creates a new App application struct
 func NewApp() *App {
 	return &App{
-		profileID:    1,
-		userID:       1,
-		activeScanCh: make(chan bool, 1),
+		profileID: 1,
+		userID:    1,
 	}
 }
 
@@ -45,7 +50,6 @@ func NewApp() *App {
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	config.InitConfig()
-	security.InitVault()
 	db.InitDB()
 }
 
@@ -81,6 +85,39 @@ func (a *App) SaveTheme(theme string) error {
 		a.profileID, theme,
 	)
 	return err
+}
+
+// Vault methods for master password management
+func (a *App) IsVaultInitialized() bool {
+	return security.IsVaultInitialized()
+}
+
+func (a *App) IsVaultUnlocked() bool {
+	return security.IsUnlocked()
+}
+
+func (a *App) InitializeVault(masterPassword string) error {
+	return security.InitializeVault(masterPassword)
+}
+
+func (a *App) UnlockVault(masterPassword string) error {
+	return security.UnlockVault(masterPassword)
+}
+
+func (a *App) LockVault() {
+	security.LockVault()
+}
+
+func (a *App) ChangeMasterPassword(oldPassword, newPassword string) error {
+	return security.ChangeMasterPassword(oldPassword, newPassword)
+}
+
+func (a *App) ExportProfile(filePath string, password string) error {
+	return profile.ExportProfile(a.profileID, filePath, password)
+}
+
+func (a *App) ImportProfile(filePath string, password string) (string, error) {
+	return profile.ImportProfile(a.userID, filePath, password)
 }
 
 // GetRecentScans fetches historical scan summary metadata
@@ -127,7 +164,12 @@ func (a *App) GetSSHHosts() ([]map[string]interface{}, error) {
 		if err := rows.Scan(&id, &name, &host, &port, &username, &authType, &credentials, &keyPassphrase); err == nil {
 			var decCred string
 			if credentials.Valid && credentials.String != "" {
-				decCred, _ = security.Decrypt(credentials.String)
+				var decErr error
+				decCred, decErr = security.Decrypt(credentials.String)
+				if decErr != nil {
+					log.Printf("Warning: failed to decrypt SSH credentials for host %s: %v", host, decErr)
+					decCred = ""
+				}
 			}
 			kp := ""
 			if keyPassphrase.Valid {
@@ -248,7 +290,12 @@ func (a *App) GetAIProviders() ([]map[string]interface{}, error) {
 		var name, typeVal, encConfig string
 		var isSelected int
 		if err := rows.Scan(&name, &typeVal, &encConfig, &isSelected); err == nil {
-			decConfig, _ := security.Decrypt(encConfig)
+			var decErr error
+			decConfig, decErr := security.Decrypt(encConfig)
+			if decErr != nil {
+				log.Printf("Warning: failed to decrypt AI provider config for %s: %v", name, decErr)
+				decConfig = ""
+			}
 			results = append(results, map[string]interface{}{
 				"name":        name,
 				"type":        typeVal,
@@ -326,13 +373,22 @@ func (a *App) GetAIModels(providerType, apiKey, baseURL string) ([]string, error
 
 // StartScan triggers local, Network Share, or SSH Remote Linux file traversal
 func (a *App) StartScan(connType string, hostID int, scanPath string) string {
+	a.scanMu.Lock()
+	defer a.scanMu.Unlock()
+
 	// Cancel any active scan first
-	a.CancelScan()
+	if a.cancelScan != nil {
+		a.cancelScan()
+	}
+	a.scanWg.Wait()
 
 	var scanCtx context.Context
 	scanCtx, a.cancelScan = context.WithCancel(context.Background())
 
+	a.scanWg.Add(1)
 	go func() {
+		defer a.scanWg.Done()
+
 		// Load active rules
 		var activeRules []rules.Rule
 		rulesStr, err := a.GetScanRules()
@@ -354,7 +410,11 @@ func (a *App) StartScan(connType string, hostID int, scanPath string) string {
 			}
 			decCredentials := ""
 			if credentials != "" {
-				decCredentials, _ = security.Decrypt(credentials)
+				var decErr error
+				decCredentials, decErr = security.Decrypt(credentials)
+				if decErr != nil {
+					log.Printf("Warning: failed to decrypt SSH credentials for scan: %v", decErr)
+				}
 			}
 
 			cfgMap := map[string]interface{}{
@@ -400,47 +460,54 @@ func (a *App) StartScan(connType string, hostID int, scanPath string) string {
 			a.profileID, scanPath, results.TotalSize, results.FilesScanned,
 		)
 		if errHist == nil {
-			scanID, _ := resHistory.LastInsertId()
-
-			// Start a transaction for bulk insertions to prevent disk sync bottleneck
-			tx, errTx := db.DB.Begin()
-			if errTx == nil {
-				// Insert top 15 large / temp / log analysis results for AI indexing
-				categories := []struct {
-					files []scanner.FileInfo
-					cat   string
-				}{
-					{results.LargeFiles, "large"},
-					{results.TempFiles, "temp"},
-					{results.LogFiles, "log"},
-					{results.BackupFiles, "backup"},
-					{results.CacheFiles, "cache"},
-				}
-				for _, cg := range categories {
-					cnt := 0
-					for _, f := range cg.files {
-						if cnt >= 15 {
-							break
+			scanID, errID := resHistory.LastInsertId()
+			if errID == nil {
+				// Start a transaction for bulk insertions to prevent disk sync bottleneck
+				tx, errTx := db.DB.Begin()
+				if errTx == nil {
+					// Insert top 15 large / temp / log analysis results for AI indexing
+					categories := []struct {
+						files []scanner.FileInfo
+						cat   string
+					}{
+						{results.LargeFiles, "large"},
+						{results.TempFiles, "temp"},
+						{results.LogFiles, "log"},
+						{results.BackupFiles, "backup"},
+						{results.CacheFiles, "cache"},
+					}
+					for _, cg := range categories {
+						cnt := 0
+						for _, f := range cg.files {
+							if cnt >= 15 {
+								break
+							}
+							if _, err := tx.Exec(
+								"INSERT INTO analysis_results (scan_id, path, category, size, risk_score, recommendation) VALUES (?, ?, ?, ?, ?, ?)",
+								scanID, f.Path, cg.cat, f.Size, 0, f.RuleMatch,
+							); err != nil {
+								log.Printf("Warning: failed to insert analysis result: %v", err)
+							}
+							cnt++
 						}
-						_, _ = tx.Exec(
-							"INSERT INTO analysis_results (scan_id, path, category, size, risk_score, recommendation) VALUES (?, ?, ?, ?, ?, ?)",
-							scanID, f.Path, cg.cat, f.Size, 0, f.RuleMatch,
-						)
-						cnt++
+					}
+
+					// Save duplicates metadata
+					for hash, dupPaths := range results.DuplicateGroups {
+						for _, dp := range dupPaths {
+							if _, err := tx.Exec(
+								"INSERT INTO duplicate_results (scan_id, file_hash, file_path, file_size) VALUES (?, ?, ?, ?)",
+								scanID, hash, dp.Path, dp.Size,
+							); err != nil {
+								log.Printf("Warning: failed to insert duplicate result: %v", err)
+							}
+						}
+					}
+
+					if err := tx.Commit(); err != nil {
+						log.Printf("Warning: failed to commit scan results transaction: %v", err)
 					}
 				}
-
-				// Save duplicates metadata
-				for hash, dupPaths := range results.DuplicateGroups {
-					for _, dp := range dupPaths {
-						_, _ = tx.Exec(
-							"INSERT INTO duplicate_results (scan_id, file_hash, file_path, file_size) VALUES (?, ?, ?, ?)",
-							scanID, hash, dp.Path, dp.Size,
-						)
-					}
-				}
-
-				_ = tx.Commit()
 			}
 		}
 
@@ -452,6 +519,8 @@ func (a *App) StartScan(connType string, hostID int, scanPath string) string {
 
 // CancelScan aborts active traversals
 func (a *App) CancelScan() {
+	a.scanMu.Lock()
+	defer a.scanMu.Unlock()
 	if a.cancelScan != nil {
 		a.cancelScan()
 		a.cancelScan = nil
@@ -461,18 +530,50 @@ func (a *App) CancelScan() {
 // DryRunCleanup checks file sizes and write access
 func (a *App) DryRunCleanup(connType string, hostID int, filePaths []string) (cleanup.DryRunResult, error) {
 	if connType == "SSH Remote Linux" {
-		// For SSH, we do a simplistic mock dry-run. We assume all files are writable since we'll run rm -f.
+		var host, username, authType, credentials, keyPassphrase string
+		var port int
+		errHost := db.DB.QueryRow("SELECT host, port, username, auth_type, credentials, key_passphrase FROM ssh_hosts WHERE id = ? AND profile_id = ?", hostID, a.profileID).Scan(&host, &port, &username, &authType, &credentials, &keyPassphrase)
+		if errHost != nil {
+			return cleanup.DryRunResult{}, errHost
+		}
+		decCredentials := ""
+		if credentials != "" {
+			var decErr error
+			decCredentials, decErr = security.Decrypt(credentials)
+			if decErr != nil {
+				log.Printf("Warning: failed to decrypt SSH credentials for dry run: %v", decErr)
+			}
+		}
+		client, err := scanner.ConnectSSH(host, port, username, authType, decCredentials, keyPassphrase)
+		if err != nil {
+			return cleanup.DryRunResult{}, err
+		}
+		defer client.Close()
+
+		var totalCount int
+		var totalSize int64
 		writableFiles := make([]map[string]interface{}, 0)
+
+		// Get actual file sizes via stat
 		for _, p := range filePaths {
+			statCmd := fmt.Sprintf("stat -c%%s %s 2>/dev/null || echo 0", scanner.ShellQuote(p))
+			out, err := scanner.RunSSHCommand(client, statCmd)
+			size := int64(0)
+			if err == nil {
+				size, _ = strconv.ParseInt(strings.TrimSpace(out), 10, 64)
+			}
+			totalCount++
+			totalSize += size
 			writableFiles = append(writableFiles, map[string]interface{}{
 				"path": p,
-				"size": int64(0),
+				"size": size,
 			})
 		}
+
 		return cleanup.DryRunResult{
-			TotalCount:         len(filePaths),
-			TotalSize:          0,
-			TotalSizeFormatted: "Unknown (SSH)",
+			TotalCount:         totalCount,
+			TotalSize:          totalSize,
+			TotalSizeFormatted: scanner.FormatSize(totalSize),
 			WritableFiles:      writableFiles,
 			RestrictedFiles:    []map[string]interface{}{},
 			CanProceed:         len(writableFiles) > 0,
@@ -503,7 +604,11 @@ func (a *App) SafeDeleteFiles(connType string, hostID int, filePaths []string, u
 			}
 			decCredentials := ""
 			if credentials != "" {
-				decCredentials, _ = security.Decrypt(credentials)
+				var decErr error
+				decCredentials, decErr = security.Decrypt(credentials)
+				if decErr != nil {
+					log.Printf("Warning: failed to decrypt SSH credentials for delete: %v", decErr)
+				}
 			}
 			client, err := scanner.ConnectSSH(host, port, username, authType, decCredentials, keyPassphrase)
 			if err != nil {
@@ -517,6 +622,16 @@ func (a *App) SafeDeleteFiles(connType string, hostID int, filePaths []string, u
 			}
 			defer client.Close()
 
+			// Get file sizes before batch delete
+			for _, p := range filePaths {
+				sizeCmd := fmt.Sprintf("stat -c%%s %s 2>/dev/null || echo 0", scanner.ShellQuote(p))
+				if out, err := scanner.RunSSHCommand(client, sizeCmd); err == nil {
+					if s, err := strconv.ParseInt(strings.TrimSpace(out), 10, 64); err == nil {
+						sizeFreed += s
+					}
+				}
+			}
+
 			// Batch delete via SSH
 			batchSize := 50
 			for i := 0; i < len(filePaths); i += batchSize {
@@ -528,7 +643,7 @@ func (a *App) SafeDeleteFiles(connType string, hostID int, filePaths []string, u
 
 				escapedBatch := make([]string, len(batch))
 				for j, p := range batch {
-					escapedBatch[j] = shellQuote(p)
+					escapedBatch[j] = scanner.ShellQuote(p)
 				}
 
 				runtime.EventsEmit(a.ctx, "delete:progress", map[string]interface{}{
@@ -549,16 +664,17 @@ func (a *App) SafeDeleteFiles(connType string, hostID int, filePaths []string, u
 				} else {
 					deletedCount += len(batch)
 					for _, p := range batch {
-						// Log success in DB with 0 size
-						_, _ = db.DB.Exec("INSERT INTO cleanup_history (profile_id, cleaned_path, size_freed, status) VALUES (?, ?, ?, 'success')", a.profileID, p, 0)
+						if _, err := db.DB.Exec("INSERT INTO cleanup_history (profile_id, cleaned_path, size_freed, status) VALUES (?, ?, ?, 'success')", a.profileID, p, 0); err != nil {
+							log.Printf("Warning: failed to log cleanup: %v", err)
+						}
 					}
 				}
 			}
 
 			runtime.EventsEmit(a.ctx, "delete:finished", map[string]interface{}{
 				"deleted_count":        deletedCount,
-				"size_freed":           0,
-				"size_freed_formatted": "Unknown (SSH)",
+				"size_freed":           sizeFreed,
+				"size_freed_formatted": scanner.FormatSize(sizeFreed),
 				"failed_paths":         failedPaths,
 			})
 			return
@@ -668,7 +784,11 @@ func (a *App) ClearContainerLogs(connType string, hostID int, containerID string
 		}
 		decCredentials := ""
 		if credentials != "" {
-			decCredentials, _ = security.Decrypt(credentials)
+			var decErr error
+			decCredentials, decErr = security.Decrypt(credentials)
+			if decErr != nil {
+				log.Printf("Warning: failed to decrypt SSH credentials: %v", decErr)
+			}
 		}
 		client, err := scanner.ConnectSSH(host, port, username, authType, decCredentials, keyPassphrase)
 		if err != nil {
@@ -677,7 +797,7 @@ func (a *App) ClearContainerLogs(connType string, hostID int, containerID string
 		defer client.Close()
 
 		// Retrieve container log path and truncate it
-		cmd := fmt.Sprintf("log_path=$(docker inspect --format='{{.LogPath}}' %s) && (sudo truncate -s 0 \"$log_path\" || truncate -s 0 \"$log_path\")", shellQuote(containerID))
+		cmd := fmt.Sprintf("log_path=$(docker inspect --format='{{.LogPath}}' %s) && (sudo truncate -s 0 \"$log_path\" || truncate -s 0 \"$log_path\")", scanner.ShellQuote(containerID))
 		_, errCmd := scanner.RunSSHCommand(client, cmd)
 		return errCmd
 	} else {
@@ -713,7 +833,11 @@ func (a *App) ClearPackageCache(connType string, hostID int, cleanCmd string, ca
 		}
 		decCredentials := ""
 		if credentials != "" {
-			decCredentials, _ = security.Decrypt(credentials)
+			var decErr error
+			decCredentials, decErr = security.Decrypt(credentials)
+			if decErr != nil {
+				log.Printf("Warning: failed to decrypt SSH credentials: %v", decErr)
+			}
 		}
 		client, err := scanner.ConnectSSH(host, port, username, authType, decCredentials, keyPassphrase)
 		if err != nil {
@@ -747,7 +871,11 @@ func (a *App) PruneDockerSystem(connType string, hostID int) error {
 		}
 		decCredentials := ""
 		if credentials != "" {
-			decCredentials, _ = security.Decrypt(credentials)
+			var decErr error
+			decCredentials, decErr = security.Decrypt(credentials)
+			if decErr != nil {
+				log.Printf("Warning: failed to decrypt SSH credentials: %v", decErr)
+			}
 		}
 		client, err := scanner.ConnectSSH(host, port, username, authType, decCredentials, keyPassphrase)
 		if err != nil {
@@ -762,10 +890,6 @@ func (a *App) PruneDockerSystem(connType string, hostID int) error {
 	// Local
 	cmd := exec.Command("docker", "system", "prune", "-af", "--volumes")
 	return cmd.Run()
-}
-
-func shellQuote(value string) string {
-	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
 func isAllowedPackageCleanCommand(cleanCmd string) bool {
@@ -795,7 +919,11 @@ func (a *App) VacuumJournaldLogs(connType string, hostID int) error {
 		}
 		decCredentials := ""
 		if credentials != "" {
-			decCredentials, _ = security.Decrypt(credentials)
+			var decErr error
+			decCredentials, decErr = security.Decrypt(credentials)
+			if decErr != nil {
+				log.Printf("Warning: failed to decrypt SSH credentials: %v", decErr)
+			}
 		}
 		client, err := scanner.ConnectSSH(host, port, username, authType, decCredentials, keyPassphrase)
 		if err != nil {
@@ -833,4 +961,25 @@ func (a *App) ClearWindowsEventLogs(connType string, hostID int) error {
 // GetStorageForecast runs chronological size regression
 func (a *App) GetStorageForecast(scanPath string) (forecast.ForecastResult, error) {
 	return forecast.CalculateForecast(a.profileID, scanPath), nil
+}
+
+// CalculateHealthScore computes storage health score from scan results
+func (a *App) CalculateHealthScore(totalSize int64, duplicateWaste int64, logSize int64, tempSize int64, sreDataJSON string) (map[string]interface{}, error) {
+	var sreData sre.SreReport
+	if err := json.Unmarshal([]byte(sreDataJSON), &sreData); err != nil {
+		return nil, fmt.Errorf("failed to parse SRE data: %w", err)
+	}
+
+	// Get forecast to determine days remaining
+	forecastData := forecast.CalculateForecast(a.profileID, "")
+	daysRemaining := -1
+	if forecastData.Status != "insufficient_data" {
+		daysRemaining = forecastData.DaysRemaining
+	}
+
+	score, warnings := sre.CalculateHealthScore(totalSize, daysRemaining, duplicateWaste, logSize, tempSize, sreData)
+	return map[string]interface{}{
+		"score":    score,
+		"warnings": warnings,
+	}, nil
 }

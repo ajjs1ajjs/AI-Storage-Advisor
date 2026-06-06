@@ -23,7 +23,13 @@ import {
     BrowseFolder,
     QueryAIChat,
     ClearContainerLogs,
-    ClearPackageCache
+    ClearPackageCache,
+    IsVaultInitialized,
+    IsVaultUnlocked,
+    UnlockVault,
+    InitializeVault,
+    LockVault,
+    ChangeMasterPassword
 } from './api.js';
 
 import { state } from './state.js';
@@ -44,13 +50,113 @@ async function initApp() {
     state.theme = await GetTheme();
     applyTheme(state.theme);
 
-    // 2. Load recent scans on dashboard
-    loadRecentScans();
+    // 2. Check vault status
+    const vaultInit = await IsVaultInitialized();
+    const vaultUnlocked = await IsVaultUnlocked();
 
-    // 3. Load configurations in background
-    settings.loadAIProviders();
-    settings.loadScanRules();
-    ssh.loadSSHHosts();
+    if (!vaultUnlocked) {
+        if (vaultInit) {
+            showVaultUnlockModal();
+        } else {
+            showVaultInitModal();
+        }
+    } else {
+        // Vault already unlocked — load everything
+        await loadVaultDependentData();
+    }
+
+    // 3. Load recent scans on dashboard
+    loadRecentScans();
+}
+
+async function loadVaultDependentData() {
+    await settings.loadAIProviders();
+    await settings.loadScanRules();
+    await ssh.loadSSHHosts();
+}
+
+// Vault unlock modal
+async function showVaultUnlockModal() {
+    const overlay = document.getElementById('modal-vault-overlay');
+    document.getElementById('vault-modal-title').innerText = '🔐 Розблокувати сховище';
+    document.getElementById('vault-modal-desc').innerText = 'Введіть master-пароль для доступу до збережених облікових даних (SSH, AI ключі).';
+    document.getElementById('vault-confirm-group').classList.add('hidden');
+    document.getElementById('vault-error-msg').style.display = 'none';
+    overlay.classList.remove('hidden');
+
+    document.getElementById('btn-vault-submit').onclick = async () => {
+        const password = document.getElementById('input-vault-password').value;
+        document.getElementById('vault-error-msg').style.display = 'none';
+        try {
+            await UnlockVault(password);
+            overlay.classList.add('hidden');
+            document.getElementById('input-vault-password').value = '';
+            await loadVaultDependentData();
+            loadRecentScans();
+        } catch (err) {
+            document.getElementById('vault-error-msg').innerText = 'Помилка: ' + (err.message || err);
+            document.getElementById('vault-error-msg').style.display = 'block';
+        }
+    };
+
+    document.getElementById('input-vault-password').onkeydown = (e) => {
+        if (e.key === 'Enter') {
+            document.getElementById('btn-vault-submit').click();
+        }
+    };
+
+    setTimeout(() => document.getElementById('input-vault-password').focus(), 100);
+}
+
+// Vault initialization modal (first run)
+async function showVaultInitModal() {
+    const overlay = document.getElementById('modal-vault-overlay');
+    document.getElementById('vault-modal-title').innerText = '🔐 Створити master-пароль';
+    document.getElementById('vault-modal-desc').innerText = 'Це перший запуск. Створіть master-пароль для захисту збережених облікових даних (SSH, AI ключі).';
+    document.getElementById('vault-confirm-group').classList.remove('hidden');
+    document.getElementById('vault-error-msg').style.display = 'none';
+    overlay.classList.remove('hidden');
+
+    document.getElementById('btn-vault-submit').onclick = async () => {
+        const password = document.getElementById('input-vault-password').value;
+        const confirm = document.getElementById('input-vault-password-confirm').value;
+        document.getElementById('vault-error-msg').style.display = 'none';
+
+        if (password.length < 8) {
+            document.getElementById('vault-error-msg').innerText = 'Помилка: пароль повинен бути щонайменше 8 символів.';
+            document.getElementById('vault-error-msg').style.display = 'block';
+            return;
+        }
+        if (password !== confirm) {
+            document.getElementById('vault-error-msg').innerText = 'Помилка: паролі не співпадають.';
+            document.getElementById('vault-error-msg').style.display = 'block';
+            return;
+        }
+        try {
+            await InitializeVault(password);
+            overlay.classList.add('hidden');
+            document.getElementById('input-vault-password').value = '';
+            document.getElementById('input-vault-password-confirm').value = '';
+            await loadVaultDependentData();
+            loadRecentScans();
+        } catch (err) {
+            document.getElementById('vault-error-msg').innerText = 'Помилка: ' + (err.message || err);
+            document.getElementById('vault-error-msg').style.display = 'block';
+        }
+    };
+
+    document.getElementById('input-vault-password').onkeydown = (e) => {
+        if (e.key === 'Enter') {
+            document.getElementById('btn-vault-submit').click();
+        }
+    };
+    document.getElementById('input-vault-password-confirm').onkeydown = (e) => {
+        if (e.key === 'Enter') {
+            document.getElementById('btn-vault-submit').click();
+        }
+    };
+
+    setTimeout(() => document.getElementById('input-vault-password').focus(), 100);
 }
 
 function applyTheme(theme) {
@@ -95,7 +201,7 @@ function switchTab(tabId) {
     } else if (tabId === 'settings') {
         document.getElementById('btn-nav-settings').classList.add('active');
         document.getElementById('tab-settings').classList.remove('hidden');
-        renderSSHHostsTable();
+        ssh.renderSSHHostsTable();
     }
 }
 
@@ -210,11 +316,6 @@ function setupEventListeners() {
     });
     document.getElementById('btn-delete-execute').addEventListener('click', scanner.executeDeletionsQueue);
 }
-
-// Scanner logic extracted to ui/scanner.js
-
-// ----------------------------------------------------
-// Settings logic extracted to ui/settings.js
 
 // Database history loads & conversions
 // ----------------------------------------------------

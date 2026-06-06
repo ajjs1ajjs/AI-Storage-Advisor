@@ -10,7 +10,11 @@ export function AddSSHHost(arg1:string,arg2:string,arg3:number,arg4:string,arg5:
 
 export function BrowseFolder():Promise<string>;
 
+export function CalculateHealthScore(arg1:number,arg2:number,arg3:number,arg4:number,arg5:string):Promise<Record<string, any>>;
+
 export function CancelScan():Promise<void>;
+
+export function ChangeMasterPassword(arg1:string,arg2:string):Promise<void>;
 
 export function ClearContainerLogs(arg1:string,arg2:number,arg3:string):Promise<void>;
 
@@ -23,6 +27,8 @@ export function DeleteSSHHost(arg1:number):Promise<void>;
 export function DryRunCleanup(arg1:string,arg2:number,arg3:Array<string>):Promise<cleanup.DryRunResult>;
 
 export function EditSSHHost(arg1:number,arg2:string,arg3:string,arg4:number,arg5:string,arg6:string,arg7:string,arg8:string):Promise<void>;
+
+export function ExportProfile(arg1:string,arg2:string):Promise<void>;
 
 export function GenerateAIRecommendation(arg1:string,arg2:Array<scanner.FileInfo>):Promise<string>;
 
@@ -42,6 +48,16 @@ export function GetStorageForecast(arg1:string):Promise<forecast.ForecastResult>
 
 export function GetTheme():Promise<string>;
 
+export function ImportProfile(arg1:string,arg2:string):Promise<string>;
+
+export function InitializeVault(arg1:string):Promise<void>;
+
+export function IsVaultInitialized():Promise<boolean>;
+
+export function IsVaultUnlocked():Promise<boolean>;
+
+export function LockVault():Promise<void>;
+
 export function PruneDockerSystem(arg1:string,arg2:number):Promise<void>;
 
 export function QueryAIChat(arg1:Array<providers.ChatMessage>):Promise<string>;
@@ -59,5 +75,7 @@ export function SaveTheme(arg1:string):Promise<void>;
 export function StartScan(arg1:string,arg2:number,arg3:string):Promise<string>;
 
 export function TestAIProviderConnection(arg1:string,arg2:string,arg3:string,arg4:string,arg5:number):Promise<main.ConnectionResult>;
+
+export function UnlockVault(arg1:string):Promise<void>;
 
 export function VacuumJournaldLogs(arg1:string,arg2:number):Promise<void>;

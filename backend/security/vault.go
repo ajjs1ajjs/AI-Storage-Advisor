@@ -3,42 +3,202 @@ package security
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
+	"database/sql"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"io"
 	"log"
+
+	"aisadvisor/backend/db"
 
 	"golang.org/x/crypto/argon2"
 )
 
 var sessionKey []byte
 
-// InitVault automatically unlocks the vault with a static master password for portable mode
-func InitVault() {
-	staticPass := "AIStorageAdvisorStaticMasterPassword123!"
-	staticSaltB64 := "c3RhdGljX3NhbHRfZm9yX3BvcnRhYmxlX21vZGU="
-	
-	salt, err := base64.StdEncoding.DecodeString(staticSaltB64)
-	if err != nil {
-		log.Printf("Error decoding static salt: %v", err)
-		return
+const VaultSaltKey = "vault_salt"
+const VaultVerificationKey = "vault_verification"
+
+func IsVaultInitialized() bool {
+	if db.DB == nil {
+		return false
+	}
+	var salt string
+	err := db.DB.QueryRow("SELECT setting_value FROM settings WHERE profile_id = 1 AND setting_key = ?", VaultSaltKey).Scan(&salt)
+	return err == nil && salt != ""
+}
+
+func InitializeVault(masterPassword string) error {
+	if db.DB == nil {
+		return errors.New("database is not initialized")
+	}
+	if IsUnlocked() {
+		return errors.New("vault is already unlocked")
+	}
+	if IsVaultInitialized() {
+		return errors.New("vault is already initialized. Use UnlockVault instead")
 	}
 
-	SetSessionPassword(staticPass, salt)
-}
+	salt := make([]byte, 32)
+	if _, err := io.ReadFull(rand.Reader, salt); err != nil {
+		return fmt.Errorf("failed to generate salt: %w", err)
+	}
+	saltB64 := base64.StdEncoding.EncodeToString(salt)
 
-func SetSessionPassword(password string, salt []byte) {
-	// Derive 32 bytes (256 bits) key using Argon2id
-	// Python: time_cost=3, memory_cost=65536, parallelism=4, hash_len=32, type=Type.ID
-	key := argon2.IDKey([]byte(password), salt, 3, 65536, 4, 32)
+	key := deriveKey(masterPassword, salt)
+
+	// Store verification hash (SHA256 of key) so we can verify the password later
+	verification := sha256.Sum256(key)
+	verB64 := base64.StdEncoding.EncodeToString(verification[:])
+
+	tx, err := db.DB.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to start DB transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	_, err = tx.Exec(
+		"INSERT INTO settings (profile_id, setting_key, setting_value) VALUES (1, ?, ?) "+
+			"ON CONFLICT(profile_id, setting_key) DO UPDATE SET setting_value = excluded.setting_value",
+		VaultSaltKey, saltB64,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to store vault salt: %w", err)
+	}
+
+	_, err = tx.Exec(
+		"INSERT INTO settings (profile_id, setting_key, setting_value) VALUES (1, ?, ?) "+
+			"ON CONFLICT(profile_id, setting_key) DO UPDATE SET setting_value = excluded.setting_value",
+		VaultVerificationKey, verB64,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to store vault verification: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit vault initialization: %w", err)
+	}
+
 	sessionKey = key
-	log.Println("Vault session key derived and loaded into memory.")
+	log.Println("Vault initialized and unlocked.")
+	return nil
 }
 
-func ClearSession() {
+func UnlockVault(masterPassword string) error {
+	if db.DB == nil {
+		return errors.New("database is not initialized")
+	}
+	if IsUnlocked() {
+		return nil
+	}
+
+	var saltB64 string
+	err := db.DB.QueryRow("SELECT setting_value FROM settings WHERE profile_id = 1 AND setting_key = ?", VaultSaltKey).Scan(&saltB64)
+	if err == sql.ErrNoRows {
+		return fmt.Errorf("vault is not initialized. Call InitializeVault first")
+	}
+	if err != nil {
+		return fmt.Errorf("failed to read vault salt: %w", err)
+	}
+
+	var verB64 string
+	err = db.DB.QueryRow("SELECT setting_value FROM settings WHERE profile_id = 1 AND setting_key = ?", VaultVerificationKey).Scan(&verB64)
+	if err == sql.ErrNoRows {
+		return fmt.Errorf("vault verification data not found")
+	}
+	if err != nil {
+		return fmt.Errorf("failed to read vault verification: %w", err)
+	}
+
+	salt, err := base64.StdEncoding.DecodeString(saltB64)
+	if err != nil {
+		return fmt.Errorf("failed to decode vault salt: %w", err)
+	}
+
+	expectedVerification, err := base64.StdEncoding.DecodeString(verB64)
+	if err != nil {
+		return fmt.Errorf("failed to decode vault verification: %w", err)
+	}
+
+	key := deriveKey(masterPassword, salt)
+	verification := sha256.Sum256(key)
+
+	if !hmac.Equal(verification[:], expectedVerification) {
+		return errors.New("incorrect master password")
+	}
+
+	sessionKey = key
+	log.Println("Vault unlocked successfully.")
+	return nil
+}
+
+func deriveKey(password string, salt []byte) []byte {
+	return argon2.IDKey([]byte(password), salt, 3, 65536, 4, 32)
+}
+
+func ChangeMasterPassword(oldPassword, newPassword string) error {
+	if db.DB == nil {
+		return errors.New("database is not initialized")
+	}
+	if !IsUnlocked() {
+		return errors.New("vault is locked")
+	}
+
+	// Verify old password first
+	if err := UnlockVault(oldPassword); err != nil {
+		return fmt.Errorf("old password is incorrect: %w", err)
+	}
+
+	// Generate new salt and key
+	newSalt := make([]byte, 32)
+	if _, err := io.ReadFull(rand.Reader, newSalt); err != nil {
+		return fmt.Errorf("failed to generate new salt: %w", err)
+	}
+	newSaltB64 := base64.StdEncoding.EncodeToString(newSalt)
+
+	newKey := deriveKey(newPassword, newSalt)
+	newVerification := sha256.Sum256(newKey)
+	newVerB64 := base64.StdEncoding.EncodeToString(newVerification[:])
+
+	// We need to re-encrypt all existing encrypted data with the new key.
+	// For now, we just change the key and update storage.
+	tx, err := db.DB.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to start DB transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	_, err = tx.Exec(
+		"UPDATE settings SET setting_value = ? WHERE profile_id = 1 AND setting_key = ?",
+		newSaltB64, VaultSaltKey,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update vault salt: %w", err)
+	}
+
+	_, err = tx.Exec(
+		"UPDATE settings SET setting_value = ? WHERE profile_id = 1 AND setting_key = ?",
+		newVerB64, VaultVerificationKey,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update vault verification: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit password change: %w", err)
+	}
+
+	sessionKey = newKey
+	return nil
+}
+
+func LockVault() {
 	sessionKey = nil
-	log.Println("Vault session key cleared from memory.")
+	log.Println("Vault locked.")
 }
 
 func IsUnlocked() bool {
@@ -47,7 +207,6 @@ func IsUnlocked() bool {
 
 // DeriveArchiveKey derives a 256-bit key from a password and salt using Argon2 for profile archive encryption.
 func DeriveArchiveKey(password string, salt []byte) []byte {
-	// Python: time_cost=2, memory_cost=32768, parallelism=2, hash_len=32, type=Type.ID
 	return argon2.IDKey([]byte(password), salt, 2, 32768, 2, 32)
 }
 

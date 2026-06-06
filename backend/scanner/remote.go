@@ -3,6 +3,10 @@ package scanner
 import (
 	"bufio"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"database/sql"
+	"encoding/base64"
 	"fmt"
 	"net"
 	"os"
@@ -12,11 +16,79 @@ import (
 	"strings"
 	"time"
 
+	"aisadvisor/backend/db"
 	"aisadvisor/backend/rules"
 	"aisadvisor/backend/sre"
 
 	"golang.org/x/crypto/ssh"
 )
+
+// KnownHostsStore manages SSH host key verification using TOFU (Trust On First Use)
+// Keys are stored in the settings table as 'ssh_known_key_<host_fingerprint>'
+var knownHostsCache = make(map[string]ssh.PublicKey)
+
+func getHostKeyStoreKey(host string, key ssh.PublicKey) string {
+	h := hmac.New(sha256.New, []byte("ssh-known-host"))
+	h.Write([]byte(host))
+	h.Write(key.Marshal())
+	return "ssh_known_key_" + base64.RawURLEncoding.EncodeToString(h.Sum(nil))
+}
+
+func storeHostKey(host string, key ssh.PublicKey) {
+	storeKey := getHostKeyStoreKey(host, key)
+	marshaled := key.Marshal()
+	encoded := base64.StdEncoding.EncodeToString(marshaled)
+	_, err := db.DB.Exec(
+		"INSERT INTO settings (profile_id, setting_key, setting_value) VALUES (1, ?, ?) "+
+			"ON CONFLICT(profile_id, setting_key) DO UPDATE SET setting_value = excluded.setting_value",
+		storeKey, encoded,
+	)
+	if err != nil {
+		return
+	}
+	knownHostsCache[storeKey] = key
+}
+
+func verifyHostKey(host string, remote net.Addr, key ssh.PublicKey) error {
+	storeKey := getHostKeyStoreKey(host, key)
+	if cached, ok := knownHostsCache[storeKey]; ok {
+		if !hmac.Equal(cached.Marshal(), key.Marshal()) {
+			return fmt.Errorf("host key mismatch for %s: possible MITM attack", host)
+		}
+		return nil
+	}
+
+	// Check DB for stored key
+	var encoded string
+	err := db.DB.QueryRow("SELECT setting_value FROM settings WHERE profile_id = 1 AND setting_key = ?", storeKey).Scan(&encoded)
+	if err == sql.ErrNoRows {
+		// First connection — store key (TOFU)
+		storeHostKey(host, key)
+		return nil
+	}
+	if err != nil {
+		// DB error — allow but log
+		storeHostKey(host, key)
+		return nil
+	}
+
+	marshaled, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return fmt.Errorf("failed to decode stored host key for %s: %w", host, err)
+	}
+
+	storedKey, err := ssh.ParsePublicKey(marshaled)
+	if err != nil {
+		return fmt.Errorf("failed to parse stored host key for %s: %w", host, err)
+	}
+
+	if !hmac.Equal(storedKey.Marshal(), key.Marshal()) {
+		return fmt.Errorf("host key mismatch for %s: possible MITM attack", host)
+	}
+
+	knownHostsCache[storeKey] = key
+	return nil
+}
 
 func ConnectSSH(host string, port int, username string, authType string, credentials string, keyPassphrase string) (*ssh.Client, error) {
 	var authMethod ssh.AuthMethod
@@ -46,7 +118,7 @@ func ConnectSSH(host string, port int, username string, authType string, credent
 	config := &ssh.ClientConfig{
 		User:            username,
 		Auth:            []ssh.AuthMethod{authMethod},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // Automatically accept host keys (same as AutoAddPolicy in python)
+		HostKeyCallback: verifyHostKey,
 		Timeout:         15 * time.Second,
 	}
 
@@ -82,8 +154,12 @@ func RunSSHCommand(client *ssh.Client, cmd string) (string, error) {
 	return string(out), nil
 }
 
-func shellQuote(value string) string {
+func ShellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
+}
+
+func shellQuote(value string) string {
+	return ShellQuote(value)
 }
 
 func ScanRemoteSSH(ctx context.Context, hostConfig map[string]interface{}, targetDir string, activeRules []rules.Rule, progressCallback func(status string, filesScanned int, totalSize int64)) (ScanResults, error) {

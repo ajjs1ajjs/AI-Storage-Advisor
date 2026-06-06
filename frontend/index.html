@@ -576,6 +576,32 @@
         </div>
     </div>
 
+    <!-- Vault Unlock Modal -->
+    <div class="modal-overlay" id="modal-vault-overlay">
+        <div class="modal-box" style="max-width: 440px;">
+            <div class="modal-header">
+                <h3 id="vault-modal-title">🔐 Розблокувати сховище</h3>
+            </div>
+            <div class="modal-body">
+                <p id="vault-modal-desc" style="color: var(--text-secondary); margin-bottom: 16px;">
+                    Введіть master-пароль для доступу до збережених облікових даних (SSH, AI ключі).
+                </p>
+                <div class="form-group">
+                    <label for="input-vault-password">Master-пароль:</label>
+                    <input type="password" id="input-vault-password" placeholder="Введіть пароль" class="form-input" autocomplete="off">
+                </div>
+                <div class="form-group hidden" id="vault-confirm-group">
+                    <label for="input-vault-password-confirm">Підтвердіть пароль:</label>
+                    <input type="password" id="input-vault-password-confirm" placeholder="Повторіть пароль" class="form-input" autocomplete="off">
+                </div>
+                <div id="vault-error-msg" class="text-danger" style="margin-top: 8px; display: none;"></div>
+            </div>
+            <div class="modal-footer">
+                <button id="btn-vault-submit" class="btn btn-primary" style="width: 100%;">Розблокувати</button>
+            </div>
+        </div>
+    </div>
+
     <script type="module" src="./src/main.js"></script>
 </body>
 </html>
