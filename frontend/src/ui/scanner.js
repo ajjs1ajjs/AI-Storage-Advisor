@@ -1,6 +1,6 @@
 import { state } from '../state.js';
 import * as api from '../api.js';
-import { formatBytes } from '../utils.js';
+import { escapeAttribute, escapeHtml, formatBytes, jsArg } from '../utils.js';
 import * as ssh from './ssh.js';
 import { EventsOn } from '../../wailsjs/runtime/runtime.js';
 
@@ -202,13 +202,14 @@ export function renderScanResults(results) {
         const hostID = parseInt(hostDropdown.value) || 0;
 
         sreData.containers.forEach(c => {
+            const handler = `clearContainerLogs(${jsArg(connType)}, ${hostID}, ${jsArg(c.id)}, event)`;
             containerBody.innerHTML += `<tr>
-                <td>${c.name}</td>
-                <td>${c.image}</td>
-                <td class="${c.write_size > 1024*1024*1024 ? 'text-danger bold' : ''}">${c.write_size_formatted}</td>
-                <td>${c.virtual_size_formatted}</td>
+                <td>${escapeHtml(c.name)}</td>
+                <td>${escapeHtml(c.image)}</td>
+                <td class="${c.write_size > 1024*1024*1024 ? 'text-danger bold' : ''}">${escapeHtml(c.write_size_formatted)}</td>
+                <td>${escapeHtml(c.virtual_size_formatted)}</td>
                 <td class="col-action">
-                    <button class="btn btn-secondary btn-icon" onclick="clearContainerLogs('${connType}', ${hostID}, '${c.id}', event)" title="Очистити логи контейнера">🧹</button>
+                    <button class="btn btn-secondary btn-icon" onclick="${escapeAttribute(handler)}" title="Очистити логи контейнера">🧹</button>
                 </td>
             </tr>`;
         });
@@ -217,8 +218,8 @@ export function renderScanResults(results) {
         volumesBody.innerHTML = '';
         sreData.volumes.forEach(v => {
             volumesBody.innerHTML += `<tr>
-                <td>${v.name}</td>
-                <td>${v.size_formatted}</td>
+                <td>${escapeHtml(v.name)}</td>
+                <td>${escapeHtml(v.size_formatted)}</td>
             </tr>`;
         });
     } else {
@@ -231,10 +232,10 @@ export function renderScanResults(results) {
         winBody.innerHTML = '';
         Object.entries(sreData.folders).forEach(([key, f]) => {
             winBody.innerHTML += `<tr>
-                <td>${key.toUpperCase()}</td>
-                <td>${f.path}</td>
-                <td>${f.count}</td>
-                <td class="${f.size > 500*1024*1024 ? 'text-danger bold' : ''}">${f.size_formatted}</td>
+                <td>${escapeHtml(key.toUpperCase())}</td>
+                <td>${escapeHtml(f.path)}</td>
+                <td>${escapeHtml(f.count)}</td>
+                <td class="${f.size > 500*1024*1024 ? 'text-danger bold' : ''}">${escapeHtml(f.size_formatted)}</td>
             </tr>`;
         });
     } else {
@@ -252,14 +253,13 @@ export function renderScanResults(results) {
         const hostID = parseInt(hostDropdown.value) || 0;
 
         sreData.package_caches.forEach(pc => {
-            const escapedCleanCmd = pc.clean_cmd.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-            const escapedPath = pc.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+            const handler = `clearPackageCache(${jsArg(connType)}, ${hostID}, ${jsArg(pc.clean_cmd)}, ${jsArg(pc.path)}, event)`;
             cacheBody.innerHTML += `<tr>
-                <td>${pc.name}</td>
-                <td style="word-break: break-all;">${pc.path}</td>
-                <td class="${pc.size > 1024*1024*1024 ? 'text-danger bold' : ''}">${pc.size_formatted}</td>
+                <td>${escapeHtml(pc.name)}</td>
+                <td style="word-break: break-all;">${escapeHtml(pc.path)}</td>
+                <td class="${pc.size > 1024*1024*1024 ? 'text-danger bold' : ''}">${escapeHtml(pc.size_formatted)}</td>
                 <td class="col-action-wide">
-                    <button class="btn btn-secondary btn-sm" onclick="clearPackageCache('${connType}', ${hostID}, '${escapedCleanCmd}', '${escapedPath}', event)">🧹 Очистити кеш</button>
+                    <button class="btn btn-secondary btn-sm" onclick="${escapeAttribute(handler)}">🧹 Очистити кеш</button>
                 </td>
             </tr>`;
         });
@@ -383,14 +383,14 @@ export function populateFilesTable(tableId, filesList) {
 
     const rows = [];
     filesList.forEach(f => {
-        const escapedPath = f.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        const handler = `confirmSingleDelete(this, ${jsArg(f.path)})`;
         
         rows.push(`<tr>
-            <td style="word-break: break-all;">${f.path}</td>
-            <td style="white-space: nowrap;">${f.size_formatted}</td>
-            <td style="color: var(--text-secondary);">${f.rule_match || '-'}</td>
+            <td style="word-break: break-all;">${escapeHtml(f.path)}</td>
+            <td style="white-space: nowrap;">${escapeHtml(f.size_formatted)}</td>
+            <td style="color: var(--text-secondary);">${escapeHtml(f.rule_match || '-')}</td>
             <td class="col-action">
-                <button class="btn-icon delete" onclick="confirmSingleDelete(this, '${escapedPath}')">🗑️</button>
+                <button class="btn-icon delete" onclick="${escapeAttribute(handler)}">🗑️</button>
             </td>
         </tr>`);
     });
@@ -410,20 +410,20 @@ export function renderDuplicatesPane(dupGroups) {
     Object.entries(dupGroups).forEach(([hash, list]) => {
         const rows = [];
         list.forEach(dp => {
-            const escapedPath = dp.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+            const handler = `confirmSingleDelete(this, ${jsArg(dp.path)})`;
             rows.push(`<div class="duplicate-path-row">
-                <span class="duplicate-path">${dp.path}</span>
+                <span class="duplicate-path">${escapeHtml(dp.path)}</span>
                 <div style="display: flex; align-items: center; gap: 10px;">
-                    <span style="color: var(--text-secondary); font-size: 11px;">${dp.size_formatted}</span>
-                    <button class="btn-icon delete" onclick="confirmSingleDelete(this, '${escapedPath}')">🗑️</button>
+                    <span style="color: var(--text-secondary); font-size: 11px;">${escapeHtml(dp.size_formatted)}</span>
+                    <button class="btn-icon delete" onclick="${escapeAttribute(handler)}">🗑️</button>
                 </div>
             </div>`);
         });
 
         cards.push(`<div class="duplicate-group-card">
             <div class="duplicate-group-header">
-                <span>Хеш групи: ${hash.substring(0, 12)}...</span>
-                <span>Знайдено копій: ${list.length}</span>
+                <span>Хеш групи: ${escapeHtml(hash.substring(0, 12))}...</span>
+                <span>Знайдено копій: ${escapeHtml(list.length)}</span>
             </div>
             <div class="duplicate-group-paths">
                 ${rows.join('')}
@@ -588,7 +588,7 @@ export async function generateAIRecommendation() {
 
         chatBrowser.scrollTop = chatBrowser.scrollHeight;
     } catch (err) {
-        chatBrowser.innerHTML = `<p class="placeholder-text text-danger">⚠️ Помилка ШІ: ${err.message || err}</p>`;
+        chatBrowser.innerHTML = `<p class="placeholder-text text-danger">⚠️ Помилка ШІ: ${escapeHtml(err.message || err)}</p>`;
         bulkDeleteBtn.classList.add('hidden');
         document.getElementById('ai-chat-input-bar').classList.add('hidden');
     } finally {
@@ -746,7 +746,7 @@ export async function sendAIChatMessage() {
         chatBrowser.innerHTML += `<div class="chat-bubble assistant">${renderMarkdown(response)}</div>`;
         updateBulkDeleteButtonVisibility();
     } catch (err) {
-        chatBrowser.innerHTML += `<div class="chat-bubble assistant text-danger">⚠️ Помилка ШІ: ${err.message || err}</div>`;
+        chatBrowser.innerHTML += `<div class="chat-bubble assistant text-danger">⚠️ Помилка ШІ: ${escapeHtml(err.message || err)}</div>`;
     } finally {
         sendBtn.removeAttribute('disabled');
         sendBtn.innerText = 'Надіслати';
@@ -767,15 +767,6 @@ export function updateBulkDeleteButtonVisibility() {
     }
 }
 
-export function escapeHtml(text) {
-    return text
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#039;");
-}
-
 window.confirmSingleDeleteFromLink = function(filePath) {
     state.deletePathsQueue = [filePath];
     showDeleteConfirmationModal();
@@ -783,7 +774,7 @@ window.confirmSingleDeleteFromLink = function(filePath) {
 
 export function renderMarkdown(md) {
     if (!md) return "";
-    let html = md;
+    let html = escapeHtml(md);
     
     html = html.replace(/### (.*)/g, '<h3>$1</h3>');
     html = html.replace(/## (.*)/g, '<h2>$1</h2>');
@@ -794,13 +785,19 @@ export function renderMarkdown(md) {
     html = html.replace(/^\s*-\s+(.*)/gm, '<li>$1</li>');
     
     html = html.replace(/\[([^\]]+)\]\(delete:\/\/([^\)]+)\)/g, (match, label, urlPath) => {
-        const decoded = decodeURIComponent(urlPath);
-        const escaped = decoded.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-        return `<a class="delete-link" href="#" onclick="confirmSingleDeleteFromLink('${escaped}'); return false;">${label}</a>`;
+        let decoded = urlPath.replace(/&amp;/g, '&');
+        try {
+            decoded = decodeURIComponent(decoded);
+        } catch (err) {
+            return label;
+        }
+        const handler = `confirmSingleDeleteFromLink(${jsArg(decoded)}); return false;`;
+        return `<a class="delete-link" href="#" data-delete-path="${escapeAttribute(decoded)}" onclick="${escapeAttribute(handler)}">${label}</a>`;
     });
 
     html = html.replace(/\[([^\]]+)\]\(action:\/\/([^\)]+)\)/g, (match, label, actionId) => {
-        return `<button class="btn btn-secondary btn-sm" onclick="triggerAIAction('${actionId}', event)" style="margin-left: 10px;">⚡ ${label}</button>`;
+        const handler = `triggerAIAction(${jsArg(actionId.replace(/&amp;/g, '&'))}, event)`;
+        return `<button class="btn btn-secondary btn-sm" onclick="${escapeAttribute(handler)}" style="margin-left: 10px;">⚡ ${label}</button>`;
     });
 
     return html;
@@ -850,10 +847,9 @@ export function triggerAIRecommendationsCleanup() {
 
     const paths = [];
     links.forEach(a => {
-        const onclickAttr = a.getAttribute('onclick');
-        const match = onclickAttr.match(/confirmSingleDeleteFromLink\('(.*)'\)/);
-        if (match && match[1]) {
-            paths.push(match[1].replace(/\\\\/g, '\\'));
+        const path = a.dataset.deletePath;
+        if (path) {
+            paths.push(path);
         }
     });
 

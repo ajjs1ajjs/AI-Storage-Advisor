@@ -1,5 +1,6 @@
 import { state } from '../state.js';
 import * as api from '../api.js';
+import { escapeHtml } from '../utils.js';
 
 export async function loadAIProviders() {
     try {
@@ -20,7 +21,7 @@ export async function loadAIProviders() {
 
             // Load model options
             const modelSelect = document.getElementById('select-ai-model');
-            modelSelect.innerHTML = `<option value="${config.model}">${config.model}</option>`;
+            modelSelect.innerHTML = `<option value="${escapeHtml(config.model)}">${escapeHtml(config.model)}</option>`;
             modelSelect.value = config.model;
         } else {
             renderAIProviderFormFields('ollama');
@@ -78,7 +79,7 @@ export async function fetchAIModelsList() {
         select.innerHTML = '';
         
         models.forEach(m => {
-            select.innerHTML += `<option value="${m}">${m}</option>`;
+            select.innerHTML += `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`;
         });
         alert('Список моделей успішно оновлено!');
     } catch (err) {

@@ -1,5 +1,6 @@
 import { state } from '../state.js';
 import * as api from '../api.js';
+import { escapeHtml } from '../utils.js';
 
 export async function loadSSHHosts() {
     try {
@@ -16,7 +17,7 @@ export function loadSSHHostsDropdown() {
     if (!select) return;
     select.innerHTML = '<option value="">-- Пряме введення --</option>';
     state.savedSSHHosts.forEach(h => {
-        select.innerHTML += `<option value="${h.id}">${h.name} (${h.host})</option>`;
+        select.innerHTML += `<option value="${escapeHtml(h.id)}">${escapeHtml(h.name)} (${escapeHtml(h.host)})</option>`;
     });
 }
 
@@ -32,10 +33,10 @@ export function renderSSHHostsTable() {
 
     state.savedSSHHosts.forEach(h => {
         tbody.innerHTML += `<tr>
-            <td>${h.name}</td>
-            <td>${h.host}</td>
-            <td>${h.port}</td>
-            <td>${h.username}</td>
+            <td>${escapeHtml(h.name)}</td>
+            <td>${escapeHtml(h.host)}</td>
+            <td>${escapeHtml(h.port)}</td>
+            <td>${escapeHtml(h.username)}</td>
             <td>${h.auth_type === 'password' ? 'Пароль' : 'Ключ'}</td>
             <td class="col-action-wide">
                 <div class="action-row-buttons">

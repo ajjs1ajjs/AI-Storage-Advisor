@@ -36,7 +36,7 @@ func ConnectSSH(host string, port int, username string, authType string, credent
 		} else {
 			signer, err = ssh.ParsePrivateKey(keyBytes)
 		}
-		
+
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse private key (if it is encrypted, passphrase is required): %w", err)
 		}
@@ -44,8 +44,8 @@ func ConnectSSH(host string, port int, username string, authType string, credent
 	}
 
 	config := &ssh.ClientConfig{
-		User: username,
-		Auth: []ssh.AuthMethod{authMethod},
+		User:            username,
+		Auth:            []ssh.AuthMethod{authMethod},
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // Automatically accept host keys (same as AutoAddPolicy in python)
 		Timeout:         15 * time.Second,
 	}
@@ -82,6 +82,10 @@ func RunSSHCommand(client *ssh.Client, cmd string) (string, error) {
 	return string(out), nil
 }
 
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
+}
+
 func ScanRemoteSSH(ctx context.Context, hostConfig map[string]interface{}, targetDir string, activeRules []rules.Rule, progressCallback func(status string, filesScanned int, totalSize int64)) (ScanResults, error) {
 	host := hostConfig["host"].(string)
 	port := int(hostConfig["port"].(float64)) // JSON parses numbers as float64
@@ -110,7 +114,7 @@ func ScanRemoteSSH(ctx context.Context, hostConfig map[string]interface{}, targe
 		dfTarget = targetDir
 	}
 
-	dfOut, err := RunSSHCommand(client, fmt.Sprintf("df -B1 '%s' | tail -n 1", dfTarget))
+	dfOut, err := RunSSHCommand(client, fmt.Sprintf("df -B1 %s | tail -n 1", shellQuote(dfTarget)))
 	if err == nil {
 		fields := strings.Fields(dfOut)
 		if len(fields) >= 4 {
@@ -128,11 +132,11 @@ func ScanRemoteSSH(ctx context.Context, hostConfig map[string]interface{}, targe
 
 	escapedPaths := make([]string, len(targetPaths))
 	for i, p := range targetPaths {
-		escapedPaths[i] = fmt.Sprintf("'%s'", p)
+		escapedPaths[i] = shellQuote(p)
 	}
 
 	findCmd := fmt.Sprintf("find %s -type f -printf '%%p|%%s|%%A@|%%T@\\n' 2>/dev/null", strings.Join(escapedPaths, " "))
-	
+
 	session, err := client.NewSession()
 	if err != nil {
 		return ScanResults{}, err
@@ -303,7 +307,7 @@ func ScanRemoteSSH(ctx context.Context, hostConfig map[string]interface{}, targe
 
 			escapedBatch := make([]string, len(batch))
 			for j, p := range batch {
-				escapedBatch[j] = fmt.Sprintf("'%s'", p)
+				escapedBatch[j] = shellQuote(p)
 			}
 
 			md5Cmd := fmt.Sprintf("md5sum %s 2>/dev/null", strings.Join(escapedBatch, " "))
@@ -312,10 +316,7 @@ func ScanRemoteSSH(ctx context.Context, hostConfig map[string]interface{}, targe
 				scannerMd5 := bufio.NewScanner(strings.NewReader(md5Out))
 				for scannerMd5.Scan() {
 					line := strings.TrimSpace(scannerMd5.Text())
-					fields := strings.Fields(line)
-					if len(fields) == 2 {
-						h, p := fields[0], fields[1]
-						p = strings.Trim(p, "'\"")
+					if h, p, ok := parseMD5SumLine(line); ok {
 						fullHashes[h] = append(fullHashes[h], p)
 					}
 				}
@@ -359,6 +360,24 @@ func ScanRemoteSSH(ctx context.Context, hostConfig map[string]interface{}, targe
 	results = rules.ProcessRules(results, activeRules)
 
 	return results, nil
+}
+
+func parseMD5SumLine(line string) (string, string, bool) {
+	line = strings.TrimSpace(line)
+	if len(line) < 34 {
+		return "", "", false
+	}
+
+	hash := line[:32]
+	rest := strings.TrimSpace(line[32:])
+	if rest == "" {
+		return "", "", false
+	}
+	if strings.HasPrefix(rest, "*") {
+		rest = strings.TrimPrefix(rest, "*")
+	}
+
+	return hash, strings.Trim(rest, "'\""), true
 }
 
 func AnalyzeRemoteDocker(client *ssh.Client) sre.SreReport {

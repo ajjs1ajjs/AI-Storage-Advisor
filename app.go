@@ -99,12 +99,12 @@ func (a *App) GetRecentScans() ([]map[string]interface{}, error) {
 		var fileCount int
 		if err := rows.Scan(&id, &path, &scanTime, &totalSize, &fileCount); err == nil {
 			results = append(results, map[string]interface{}{
-				"id":        id,
-				"scan_path": path,
-				"scan_time": scanTime,
-				"total_size": totalSize,
+				"id":                   id,
+				"scan_path":            path,
+				"scan_time":            scanTime,
+				"total_size":           totalSize,
 				"total_size_formatted": scanner.FormatSize(totalSize),
-				"file_count": fileCount,
+				"file_count":           fileCount,
 			})
 		}
 	}
@@ -495,7 +495,7 @@ func (a *App) SafeDeleteFiles(connType string, hostID int, filePaths []string, u
 			if errHost != nil {
 				runtime.EventsEmit(a.ctx, "delete:finished", map[string]interface{}{
 					"deleted_count":        0,
-					"size_freed":          0,
+					"size_freed":           0,
 					"size_freed_formatted": "0 B",
 					"failed_paths":         []map[string]interface{}{{"path": "SSH", "error": "Host not found"}},
 				})
@@ -509,7 +509,7 @@ func (a *App) SafeDeleteFiles(connType string, hostID int, filePaths []string, u
 			if err != nil {
 				runtime.EventsEmit(a.ctx, "delete:finished", map[string]interface{}{
 					"deleted_count":        0,
-					"size_freed":          0,
+					"size_freed":           0,
 					"size_freed_formatted": "0 B",
 					"failed_paths":         []map[string]interface{}{{"path": "SSH", "error": err.Error()}},
 				})
@@ -528,7 +528,7 @@ func (a *App) SafeDeleteFiles(connType string, hostID int, filePaths []string, u
 
 				escapedBatch := make([]string, len(batch))
 				for j, p := range batch {
-					escapedBatch[j] = fmt.Sprintf("'%s'", p)
+					escapedBatch[j] = shellQuote(p)
 				}
 
 				runtime.EventsEmit(a.ctx, "delete:progress", map[string]interface{}{
@@ -557,7 +557,7 @@ func (a *App) SafeDeleteFiles(connType string, hostID int, filePaths []string, u
 
 			runtime.EventsEmit(a.ctx, "delete:finished", map[string]interface{}{
 				"deleted_count":        deletedCount,
-				"size_freed":          0,
+				"size_freed":           0,
 				"size_freed_formatted": "Unknown (SSH)",
 				"failed_paths":         failedPaths,
 			})
@@ -586,7 +586,7 @@ func (a *App) SafeDeleteFiles(connType string, hostID int, filePaths []string, u
 
 		runtime.EventsEmit(a.ctx, "delete:finished", map[string]interface{}{
 			"deleted_count":        deletedCount,
-			"size_freed":          sizeFreed,
+			"size_freed":           sizeFreed,
 			"size_freed_formatted": scanner.FormatSize(sizeFreed),
 			"failed_paths":         failedPaths,
 		})
@@ -677,7 +677,7 @@ func (a *App) ClearContainerLogs(connType string, hostID int, containerID string
 		defer client.Close()
 
 		// Retrieve container log path and truncate it
-		cmd := fmt.Sprintf("log_path=$(docker inspect --format='{{.LogPath}}' %s) && (sudo truncate -s 0 $log_path || truncate -s 0 $log_path)", containerID)
+		cmd := fmt.Sprintf("log_path=$(docker inspect --format='{{.LogPath}}' %s) && (sudo truncate -s 0 \"$log_path\" || truncate -s 0 \"$log_path\")", shellQuote(containerID))
 		_, errCmd := scanner.RunSSHCommand(client, cmd)
 		return errCmd
 	} else {
@@ -700,6 +700,10 @@ func (a *App) ClearContainerLogs(connType string, hostID int, containerID string
 
 // ClearPackageCache runs clean commands for package manager caches
 func (a *App) ClearPackageCache(connType string, hostID int, cleanCmd string, cachePath string) error {
+	if !isAllowedPackageCleanCommand(cleanCmd) {
+		return errors.New("package cache cleanup command is not allowed")
+	}
+
 	if connType == "SSH Remote Linux" {
 		var host, username, authType, credentials, keyPassphrase string
 		var port int
@@ -758,6 +762,25 @@ func (a *App) PruneDockerSystem(connType string, hostID int) error {
 	// Local
 	cmd := exec.Command("docker", "system", "prune", "-af", "--volumes")
 	return cmd.Run()
+}
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
+}
+
+func isAllowedPackageCleanCommand(cleanCmd string) bool {
+	allowed := map[string]bool{
+		"npm cache clean --force":                                 true,
+		"pip cache purge":                                         true,
+		"dotnet nuget locals all --clear":                         true,
+		"sudo apt-get clean || apt-get clean":                     true,
+		"sudo dnf clean all || sudo yum clean all":                true,
+		"sudo pacman -Scc --noconfirm || pacman -Scc --noconfirm": true,
+		"sudo zypper clean -a || zypper clean -a":                 true,
+		"rm -rf ~/.cargo/registry/cache/*":                        true,
+		"go clean -cache -modcache":                               true,
+	}
+	return allowed[strings.TrimSpace(cleanCmd)]
 }
 
 // VacuumJournaldLogs clears old journald logs
