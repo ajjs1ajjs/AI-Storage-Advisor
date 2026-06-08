@@ -1,14 +1,30 @@
 # AI Storage Advisor 🚀
 
-[![Go Version](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go)](https://golang.org)
-[![Wails](https://img.shields.io/badge/Wails-v2-blue?logo=wails)](https://wails.io)
-[![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-passing-brightgreen)]()
+[![CI](https://github.com/ajjs1ajjs/AI-Storage-Advisor/actions/workflows/ci.yml/badge.svg)](https://github.com/ajjs1ajjs/AI-Storage-Advisor/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/ajjs1ajjs/AI-Storage-Advisor/actions/workflows/codeql.yml/badge.svg)](https://github.com/ajjs1ajjs/AI-Storage-Advisor/actions/workflows/codeql.yml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/ajjs1ajjs/AI-Storage-Advisor)](https://goreportcard.com/report/github.com/ajjs1ajjs/AI-Storage-Advisor)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Go Version](https://img.shields.io/badge/Go-1.25+-00ADD8)](https://golang.org)
+[![Tests](https://img.shields.io/badge/tests-200%2B-brightgreen)](https://github.com/ajjs1ajjs/AI-Storage-Advisor/actions)
 
 **AI Storage Advisor** / **AI Радник зі Сховища**
 
 > *AI-powered disk analysis, forecasting, and secure cleanup tool*
 > *Інструмент аналізу дисків, прогнозування та безпечного очищення з використанням ШІ*
+
+---
+
+### 🏆 Features
+
+- **Wails v2** — Go backend + Vanilla JS frontend, native desktop app
+- **Virtual Scrolling** — 100k+ files without lag (VirtualScroller)
+- **End-to-end Encryption** — AES-256-GCM + Argon2id for credentials & profiles
+- **Forecasting** — Linear regression for storage growth prediction
+- **SSH Remote Scanning** — Connect to remote Linux hosts for analysis
+- **AI Integration** — OpenAI, Anthropic, Gemini, DeepSeek, Ollama, LM Studio
+- **Windows Recycle Bin** — Safe deletion via `IFileOperation`
+- **SRE Health Score** — Storage reliability metrics (duplicates, logs, temp, SRE)
+- **CI/CD** — GitHub Actions (Go + Node matrix), CodeQL, golangci-lint, Lefthook
 
 ---
 
@@ -108,9 +124,28 @@ wails dev
 ```
 
 ### Run Tests / Запуск тестів
-```powershell
+\`\`\`powershell
 go test ./... -v -count=1
-```
+\`\`\`
+
+---
+
+### 🧪 Testing
+
+\`\`\`
+# Run all Go tests
+go test ./... -count=1
+
+# Run benchmarks
+go test -bench=. -benchmem ./backend/scanner/ ./backend/security/ ./backend/forecast/
+
+# Run frontend tests
+cd frontend && npm test
+
+# Run fuzz tests
+go test -fuzz=FuzzEncryptDecrypt ./backend/security/
+go test -fuzz=FuzzDecryptInvalid ./backend/security/
+\`\`\`
 
 ---
 
@@ -160,62 +195,39 @@ AI language can be changed in Settings → AI Providers → Language.
 
 ---
 
-## 📁 Project Structure / Структура проекту
+### 📁 Project Structure
 
-```
-AI-Storage-Advisor/
-├── main.go                    # Wails app entry point
-├── app.go                     # Go backend bindings
-├── app_test.go                # Backend tests
-├── wails.json                 # Wails configuration
-├── go.mod / go.sum            # Go dependencies
-├── frontend/                  # Web frontend
-│   ├── index.html             # Main HTML (Ukrainian UI)
+\`\`\`
+.
+├── app.go                          # Wails app bindings (~1105 lines)
+├── app_test.go / app_ssh_test.go   # Tests for app functions
+├── backend/
+│   ├── cleanup/       # Safe file deletion (Windows recycle bin)
+│   ├── config/        # App configuration & paths
+│   ├── db/            # SQLite database init & schema
+│   ├── forecast/      # Storage growth forecasting
+│   ├── logger/        # Structured logging (DEBUG/INFO/WARN/ERROR/FATAL)
+│   ├── profile/       # Profile export/import with encryption
+│   ├── providers/     # AI providers (OpenAI, Anthropic, Gemini, etc.)
+│   ├── rules/         # Cleanup rules engine
+│   ├── scanner/       # Disk scanner (local + SSH + MD5 dedup)
+│   ├── security/      # AES-256-GCM vault + Argon2id key derivation
+│   ├── sre/           # Health score calculation
+│   └── utils/         # Shared utilities (FormatSize)
+├── frontend/
 │   ├── src/
-│   │   ├── main.js            # App initialization & routing
-│   │   ├── api.js             # Wails Go bindings re-export
-│   │   ├── state.js           # Global application state
-│   │   ├── utils.js           # Utility functions
-│   │   ├── app.css / style.css# Theming & styling
-│   │   └── ui/
-│   │       ├── scanner.js     # Scan & results rendering
-│   │       ├── settings.js    # Settings forms logic
-│   │       └── ssh.js         # SSH host CRUD
-│   └── package.json           # Node.js dependencies
-├── backend/                   # Go backend packages
-│   ├── scanner/               # File system scanning
-│   │   ├── scanner.go         # Local disk scanner
-│   │   ├── remote.go          # SSH remote scanner
-│   │   └── *_test.go          # Scanner tests
-│   ├── cleanup/               # Secure file deletion
-│   │   ├── cleanup.go         # Dry run & safe delete
-│   │   └── cleanup_test.go    # Cleanup tests
-│   ├── security/              # Encryption vault
-│   │   ├── vault.go           # AES-256-GCM + Argon2id
-│   │   └── vault_test.go      # Vault tests
-│   ├── providers/             # AI provider integrations
-│   │   └── providers.go       # OpenAI, Gemini, Ollama, etc.
-│   ├── rules/                 # Scan rules engine
-│   │   ├── rules.go           # Rule evaluation & processing
-│   │   └── rules_test.go      # Rules tests
-│   ├── sre/                   # SRE health analysis
-│   │   ├── sre.go             # Docker, Windows analysis
-│   │   └── sre_test.go        # SRE tests
-│   ├── forecast/              # Storage forecasting
-│   │   └── forecast.go        # OLS linear regression
-│   ├── profile/               # Profile export/import
-│   │   └── profile.go         # Encrypted backup
-│   ├── config/                # Application configuration
-│   │   ├── config.go          # Cross-platform config init
-│   │   ├── config_windows.go  # Windows-specific
-│   │   ├── config_other.go    # Unix-specific
-│   │   └── config_test.go     # Config tests
-│   └── db/                    # SQLite database
-│       └── db.go              # Schema & initialization
-├── windows/                   # Windows resources
-├── darwin/                    # macOS resources
-└── build/                     # Build output
-```
+│   │   ├── ui/        # UI components (scanner, settings, ssh, virtual-scroll)
+│   │   ├── state.js   # Global reactive state
+│   │   ├── utils.js   # Frontend helpers
+│   │   └── __tests__/ # Vitest tests (50+ tests)
+│   ├── package.json
+│   └── vite.config.js
+├── .github/workflows/  # CI/CD (ci.yml, codeql.yml)
+├── .golangci.yml       # Go linter config
+├── lefthook.yml        # Pre-commit hooks
+├── Dockerfile          # Dev/CI environment
+└── README.md           # Documentation (UA + EN)
+\`\`\`
 
 ---
 

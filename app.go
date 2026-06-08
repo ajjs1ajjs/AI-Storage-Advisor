@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"os/exec"
 	goRuntime "runtime"
 	"strconv"
@@ -16,6 +15,7 @@ import (
 
 	"aisadvisor/backend/cleanup"
 	"aisadvisor/backend/config"
+	"aisadvisor/backend/logger"
 	"aisadvisor/backend/db"
 	"aisadvisor/backend/forecast"
 	"aisadvisor/backend/profile"
@@ -168,7 +168,7 @@ func (a *App) GetSSHHosts() ([]map[string]interface{}, error) {
 				var decErr error
 				decCred, decErr = security.Decrypt(credentials.String)
 				if decErr != nil {
-					log.Printf("Warning: failed to decrypt SSH credentials for host %s: %v", host, decErr)
+					logger.Warn("failed to decrypt SSH credentials for host %s: %v", host, decErr)
 					decCred = ""
 				}
 			}
@@ -177,7 +177,7 @@ func (a *App) GetSSHHosts() ([]map[string]interface{}, error) {
 			var decErr error
 			kp, decErr = security.Decrypt(keyPassphrase.String)
 			if decErr != nil {
-				log.Printf("Warning: failed to decrypt SSH key passphrase for host %s: %v", host, decErr)
+				logger.Warn("failed to decrypt SSH key passphrase for host %s: %v", host, decErr)
 				kp = ""
 			}
 		}
@@ -317,7 +317,7 @@ func (a *App) GetAIProviders() ([]map[string]interface{}, error) {
 			var decErr error
 			decConfig, decErr := security.Decrypt(encConfig)
 			if decErr != nil {
-				log.Printf("Warning: failed to decrypt AI provider config for %s: %v", name, decErr)
+				logger.Warn("failed to decrypt AI provider config for %s: %v", name, decErr)
 				decConfig = ""
 			}
 			results = append(results, map[string]interface{}{
@@ -437,7 +437,7 @@ func (a *App) StartScan(connType string, hostID int, scanPath string) string {
 				var decErr error
 				decCredentials, decErr = security.Decrypt(credentials)
 				if decErr != nil {
-					log.Printf("Warning: failed to decrypt SSH credentials for scan: %v", decErr)
+					logger.Warn("failed to decrypt SSH credentials for scan: %v", decErr)
 				}
 			}
 			keyPassphrase := ""
@@ -445,7 +445,7 @@ func (a *App) StartScan(connType string, hostID int, scanPath string) string {
 				var decErr error
 				keyPassphrase, decErr = security.Decrypt(encPassphrase)
 				if decErr != nil {
-					log.Printf("Warning: failed to decrypt SSH key passphrase for scan: %v", decErr)
+					logger.Warn("failed to decrypt SSH key passphrase for scan: %v", decErr)
 				}
 			}
 
@@ -518,7 +518,7 @@ func (a *App) StartScan(connType string, hostID int, scanPath string) string {
 								"INSERT INTO analysis_results (scan_id, path, category, size, risk_score, recommendation) VALUES (?, ?, ?, ?, ?, ?)",
 								scanID, f.Path, cg.cat, f.Size, 0, f.RuleMatch,
 							); err != nil {
-								log.Printf("Warning: failed to insert analysis result: %v", err)
+								logger.Warn("failed to insert analysis result: %v", err)
 							}
 							cnt++
 						}
@@ -531,13 +531,13 @@ func (a *App) StartScan(connType string, hostID int, scanPath string) string {
 								"INSERT INTO duplicate_results (scan_id, file_hash, file_path, file_size) VALUES (?, ?, ?, ?)",
 								scanID, hash, dp.Path, dp.Size,
 							); err != nil {
-								log.Printf("Warning: failed to insert duplicate result: %v", err)
+								logger.Warn("failed to insert duplicate result: %v", err)
 							}
 						}
 					}
 
 					if err := tx.Commit(); err != nil {
-						log.Printf("Warning: failed to commit scan results transaction: %v", err)
+						logger.Warn("failed to commit scan results transaction: %v", err)
 					}
 				}
 			}
@@ -573,7 +573,7 @@ func (a *App) DryRunCleanup(connType string, hostID int, filePaths []string) (cl
 			var decErr error
 			decCredentials, decErr = security.Decrypt(credentials)
 			if decErr != nil {
-				log.Printf("Warning: failed to decrypt SSH credentials for dry run: %v", decErr)
+				logger.Warn("failed to decrypt SSH credentials for dry run: %v", decErr)
 			}
 		}
 		keyPassphrase := ""
@@ -581,7 +581,7 @@ func (a *App) DryRunCleanup(connType string, hostID int, filePaths []string) (cl
 			var decErr error
 			keyPassphrase, decErr = security.Decrypt(encPassphrase)
 			if decErr != nil {
-				log.Printf("Warning: failed to decrypt SSH key passphrase for dry run: %v", decErr)
+				logger.Warn("failed to decrypt SSH key passphrase for dry run: %v", decErr)
 			}
 		}
 		client, err := scanner.ConnectSSH(host, port, username, authType, decCredentials, keyPassphrase)
@@ -647,7 +647,7 @@ func (a *App) SafeDeleteFiles(connType string, hostID int, filePaths []string, u
 				var decErr error
 				decCredentials, decErr = security.Decrypt(credentials)
 				if decErr != nil {
-					log.Printf("Warning: failed to decrypt SSH credentials for delete: %v", decErr)
+					logger.Warn("failed to decrypt SSH credentials for delete: %v", decErr)
 				}
 			}
 			keyPassphrase := ""
@@ -655,7 +655,7 @@ func (a *App) SafeDeleteFiles(connType string, hostID int, filePaths []string, u
 				var decErr error
 				keyPassphrase, decErr = security.Decrypt(encPassphrase)
 				if decErr != nil {
-					log.Printf("Warning: failed to decrypt SSH key passphrase for delete: %v", decErr)
+					logger.Warn("failed to decrypt SSH key passphrase for delete: %v", decErr)
 				}
 			}
 			client, err := scanner.ConnectSSH(host, port, username, authType, decCredentials, keyPassphrase)
@@ -713,7 +713,7 @@ func (a *App) SafeDeleteFiles(connType string, hostID int, filePaths []string, u
 					deletedCount += len(batch)
 					for _, p := range batch {
 						if _, err := db.DB.Exec("INSERT INTO cleanup_history (profile_id, cleaned_path, size_freed, status) VALUES (?, ?, ?, 'success')", a.profileID, p, 0); err != nil {
-							log.Printf("Warning: failed to log cleanup: %v", err)
+							logger.Warn("failed to log cleanup: %v", err)
 						}
 					}
 				}
@@ -835,7 +835,7 @@ func (a *App) ClearContainerLogs(connType string, hostID int, containerID string
 			var decErr error
 			decCredentials, decErr = security.Decrypt(credentials)
 			if decErr != nil {
-				log.Printf("Warning: failed to decrypt SSH credentials: %v", decErr)
+				logger.Warn("failed to decrypt SSH credentials: %v", decErr)
 			}
 		}
 		keyPassphrase := ""
@@ -843,7 +843,7 @@ func (a *App) ClearContainerLogs(connType string, hostID int, containerID string
 			var decErr error
 			keyPassphrase, decErr = security.Decrypt(encPassphrase)
 			if decErr != nil {
-				log.Printf("Warning: failed to decrypt SSH key passphrase: %v", decErr)
+				logger.Warn("failed to decrypt SSH key passphrase: %v", decErr)
 			}
 		}
 		client, err := scanner.ConnectSSH(host, port, username, authType, decCredentials, keyPassphrase)
@@ -902,7 +902,7 @@ func (a *App) ClearPackageCache(connType string, hostID int, cleanCmd string, ca
 			var decErr error
 			decCredentials, decErr = security.Decrypt(credentials)
 			if decErr != nil {
-				log.Printf("Warning: failed to decrypt SSH credentials: %v", decErr)
+				logger.Warn("failed to decrypt SSH credentials: %v", decErr)
 			}
 		}
 		keyPassphrase := ""
@@ -910,7 +910,7 @@ func (a *App) ClearPackageCache(connType string, hostID int, cleanCmd string, ca
 			var decErr error
 			keyPassphrase, decErr = security.Decrypt(encPassphrase)
 			if decErr != nil {
-				log.Printf("Warning: failed to decrypt SSH key passphrase: %v", decErr)
+				logger.Warn("failed to decrypt SSH key passphrase: %v", decErr)
 			}
 		}
 		client, err := scanner.ConnectSSH(host, port, username, authType, decCredentials, keyPassphrase)
@@ -958,7 +958,7 @@ func (a *App) PruneDockerSystem(connType string, hostID int) error {
 			var decErr error
 			decCredentials, decErr = security.Decrypt(credentials)
 			if decErr != nil {
-				log.Printf("Warning: failed to decrypt SSH credentials: %v", decErr)
+				logger.Warn("failed to decrypt SSH credentials: %v", decErr)
 			}
 		}
 		keyPassphrase := ""
@@ -966,7 +966,7 @@ func (a *App) PruneDockerSystem(connType string, hostID int) error {
 			var decErr error
 			keyPassphrase, decErr = security.Decrypt(encPassphrase)
 			if decErr != nil {
-				log.Printf("Warning: failed to decrypt SSH key passphrase: %v", decErr)
+				logger.Warn("failed to decrypt SSH key passphrase: %v", decErr)
 			}
 		}
 		client, err := scanner.ConnectSSH(host, port, username, authType, decCredentials, keyPassphrase)
@@ -1024,7 +1024,7 @@ func (a *App) VacuumJournaldLogs(connType string, hostID int) error {
 			var decErr error
 			decCredentials, decErr = security.Decrypt(credentials)
 			if decErr != nil {
-				log.Printf("Warning: failed to decrypt SSH credentials: %v", decErr)
+				logger.Warn("failed to decrypt SSH credentials: %v", decErr)
 			}
 		}
 		keyPassphrase := ""
@@ -1032,7 +1032,7 @@ func (a *App) VacuumJournaldLogs(connType string, hostID int) error {
 			var decErr error
 			keyPassphrase, decErr = security.Decrypt(encPassphrase)
 			if decErr != nil {
-				log.Printf("Warning: failed to decrypt SSH key passphrase: %v", decErr)
+				logger.Warn("failed to decrypt SSH key passphrase: %v", decErr)
 			}
 		}
 		client, err := scanner.ConnectSSH(host, port, username, authType, decCredentials, keyPassphrase)

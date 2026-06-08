@@ -2,7 +2,6 @@ package cleanup
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -10,6 +9,7 @@ import (
 	"unsafe"
 
 	"aisadvisor/backend/db"
+	"aisadvisor/backend/logger"
 	"aisadvisor/backend/utils"
 )
 
@@ -144,7 +144,7 @@ func SafeDeleteFile(profileID int, filePath string, useRecycleBin bool) (int64, 
 				profileID, pAbs, err.Error(),
 			)
 			if dbErr != nil {
-				log.Printf("Warning: Failed to log cleanup failure to DB: %v", dbErr)
+				logger.Warn("Failed to log cleanup failure to DB: %v", dbErr)
 			}
 		}
 		return 0, err
@@ -156,7 +156,7 @@ func SafeDeleteFile(profileID int, filePath string, useRecycleBin bool) (int64, 
 			profileID, pAbs, size,
 		)
 		if dbErr != nil {
-			log.Printf("Warning: Failed to log cleanup success to DB: %v", dbErr)
+			logger.Warn("Failed to log cleanup success to DB: %v", dbErr)
 		}
 	}
 

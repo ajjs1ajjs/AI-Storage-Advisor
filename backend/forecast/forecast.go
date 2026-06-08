@@ -3,11 +3,11 @@ package forecast
 import (
 	"database/sql"
 	"fmt"
-	"log"
 	"math"
 	"time"
 
 	"aisadvisor/backend/db"
+	"aisadvisor/backend/logger"
 
 	"github.com/shirou/gopsutil/v3/disk"
 )
@@ -36,7 +36,7 @@ func CalculateForecast(profileID int, scanPath string) ForecastResult {
 		profileID,
 	)
 	if err != nil {
-		log.Printf("Error fetching scan history: %v", err)
+		logger.Error("Error fetching scan history: %v", err)
 		return ForecastResult{
 			Status:        "error",
 			Message:       "Failed to fetch scan history: " + err.Error(),
@@ -90,7 +90,7 @@ func CalculateForecast(profileID int, scanPath string) ForecastResult {
 			}
 		}
 		if parseErr != nil {
-			log.Printf("Warning: Failed to parse scan history timestamp %s: %v", rp.scanTime, parseErr)
+			logger.Warn("Failed to parse scan history timestamp %s: %v", rp.scanTime, parseErr)
 			continue
 		}
 
@@ -150,7 +150,7 @@ func CalculateForecast(profileID int, scanPath string) ForecastResult {
 		freeBytes = usage.Free
 		totalBytes = usage.Total
 	} else {
-		log.Printf("Warning: Failed to check disk usage on %s: %v", scanPath, err)
+		logger.Warn("Failed to check disk usage on %s: %v", scanPath, err)
 	}
 
 	daysRemaining := -1
@@ -175,7 +175,7 @@ func CalculateForecast(profileID int, scanPath string) ForecastResult {
 		profileID, sql.NullInt64{Int64: int64(daysRemaining), Valid: daysRemaining != -1}, int64(dailyGrowth),
 	)
 	if errDb != nil {
-		log.Printf("Warning: Failed to insert forecast history to DB: %v", errDb)
+		logger.Warn("Failed to insert forecast history to DB: %v", errDb)
 	}
 
 	// Compute trend points for graph

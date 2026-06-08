@@ -1,9 +1,10 @@
 package rules
 
 import (
-	"log"
 	"reflect"
 	"time"
+
+	"aisadvisor/backend/logger"
 )
 
 type Rule struct {
@@ -148,6 +149,6 @@ func ProcessRules[T any](results T, activeRules []Rule) T {
 		rfsField.SetInt(flaggedSize)
 	}
 
-	log.Printf("Rules engine completed. Flagged %d files for cleanup.", flaggedCount)
+	logger.Info("Rules engine completed. Flagged %d files for cleanup.", flaggedCount)
 	return results
 }

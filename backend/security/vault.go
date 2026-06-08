@@ -11,9 +11,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
-
 	"aisadvisor/backend/db"
+	"aisadvisor/backend/logger"
 
 	"golang.org/x/crypto/argon2"
 )
@@ -84,7 +83,7 @@ func InitializeVault(masterPassword string) error {
 	}
 
 	sessionKey = key
-	log.Println("Vault initialized and unlocked.")
+	logger.Info("Vault initialized and unlocked.")
 	return nil
 }
 
@@ -132,7 +131,7 @@ func UnlockVault(masterPassword string) error {
 	}
 
 	sessionKey = key
-	log.Println("Vault unlocked successfully.")
+	logger.Info("Vault unlocked successfully.")
 	return nil
 }
 
@@ -198,7 +197,7 @@ func ChangeMasterPassword(oldPassword, newPassword string) error {
 
 func LockVault() {
 	sessionKey = nil
-	log.Println("Vault locked.")
+	logger.Info("Vault locked.")
 }
 
 func IsUnlocked() bool {

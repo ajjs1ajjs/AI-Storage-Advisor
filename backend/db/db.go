@@ -2,20 +2,20 @@ package db
 
 import (
 	"database/sql"
-	"log"
 	"time"
 
 	_ "modernc.org/sqlite"
 	"aisadvisor/backend/config"
+	"aisadvisor/backend/logger"
 )
 
 var DB *sql.DB
 
 func InitDB() {
-	log.Printf("Opening database at: %s", config.DbPath)
+	logger.Info("Opening database at: %s", config.DbPath)
 	db, err := sql.Open("sqlite", config.DbPath)
 	if err != nil {
-		log.Fatalf("Failed to open SQLite database: %v", err)
+		logger.Fatal("Failed to open SQLite database: %v", err)
 	}
 
 	// SQLite single-writer safe settings
@@ -26,13 +26,13 @@ func InitDB() {
 	// Test and configure connection
 	_, err = db.Exec("PRAGMA busy_timeout=10000;")
 	if err != nil {
-		log.Printf("Warning: Failed to set busy timeout: %v", err)
+		logger.Warn("Failed to set busy timeout: %v", err)
 	}
 
 	// Enable WAL, fallback if it fails (e.g. on Network UNC mounts)
 	_, err = db.Exec("PRAGMA journal_mode=WAL;")
 	if err != nil {
-		log.Printf("Warning: Failed to enable WAL journal mode: %v. Falling back to default journal mode.", err)
+		logger.Warn("Failed to enable WAL journal mode: %v. Falling back to default journal mode.", err)
 	}
 
 	DB = db
@@ -139,14 +139,14 @@ func createTables() {
 
 	for _, q := range queries {
 		if _, err := DB.Exec(q); err != nil {
-			log.Fatalf("Failed to execute DB setup query: %v\nQuery: %s", err, q)
+			logger.Fatal("Failed to execute DB setup query: %v\nQuery: %s", err, q)
 		}
 	}
 
 	// Migrations
 	_, _ = DB.Exec(`ALTER TABLE ssh_hosts ADD COLUMN key_passphrase TEXT DEFAULT ''`)
 
-	log.Println("Database schema checked and verified.")
+	logger.Info("Database schema checked and verified.")
 }
 
 func seedDefaults() {
@@ -154,36 +154,36 @@ func seedDefaults() {
 	var exists int
 	err := DB.QueryRow("SELECT COUNT(1) FROM users WHERE id = 1").Scan(&exists)
 	if err != nil {
-		log.Printf("Error checking default user: %v", err)
+		logger.Error("checking default user: %v", err)
 	}
 	if exists == 0 {
 		_, err = DB.Exec("INSERT OR REPLACE INTO users (id, username, password_hash, salt) VALUES (1, 'default_user', 'N/A', 'N/A')")
 		if err != nil {
-			log.Printf("Error seeding default user: %v", err)
+			logger.Error("seeding default user: %v", err)
 		}
 	}
 
 	// Seed default profile
 	err = DB.QueryRow("SELECT COUNT(1) FROM profiles WHERE id = 1").Scan(&exists)
 	if err != nil {
-		log.Printf("Error checking default profile: %v", err)
+		logger.Error("checking default profile: %v", err)
 	}
 	if exists == 0 {
 		_, err = DB.Exec("INSERT OR REPLACE INTO profiles (id, user_id, profile_name, is_active) VALUES (1, 1, 'default_profile', 1)")
 		if err != nil {
-			log.Printf("Error seeding default profile: %v", err)
+			logger.Error("seeding default profile: %v", err)
 		}
 	}
 
 	// Seed default theme setting
 	err = DB.QueryRow("SELECT COUNT(1) FROM settings WHERE profile_id = 1 AND setting_key = 'theme'").Scan(&exists)
 	if err != nil {
-		log.Printf("Error checking theme setting: %v", err)
+		logger.Error("checking theme setting: %v", err)
 	}
 	if exists == 0 {
 		_, err = DB.Exec("INSERT INTO settings (profile_id, setting_key, setting_value) VALUES (1, 'theme', 'dark')")
 		if err != nil {
-			log.Printf("Error seeding theme: %v", err)
+			logger.Error("seeding theme: %v", err)
 		}
 	}
 }

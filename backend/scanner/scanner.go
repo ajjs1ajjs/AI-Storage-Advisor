@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -17,6 +16,7 @@ import (
 	"github.com/cespare/xxhash/v2"
 	"golang.org/x/sync/errgroup"
 
+	"aisadvisor/backend/logger"
 	"aisadvisor/backend/rules"
 	"aisadvisor/backend/sre"
 	"aisadvisor/backend/utils"
@@ -62,7 +62,7 @@ func FormatSize(sizeBytes int64) string {
 }
 
 func ScanLocalDisk(ctx context.Context, startPath string, activeRules []rules.Rule, progressCallback func(currentDir string, filesScanned int, totalSize int64)) (ScanResults, error) {
-	log.Printf("Starting local scan on: %s", startPath)
+	logger.Info("Starting local scan on: %s", startPath)
 
 	var filesScanned int
 	var totalSize int64
