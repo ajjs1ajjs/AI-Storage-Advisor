@@ -1,0 +1,33 @@
+# Auto detect text files and normalize line endings to LF on commit
+* text=auto
+
+# Go source
+*.go text eol=lf
+
+# JavaScript / TypeScript
+*.js text eol=lf
+*.ts text eol=lf
+*.mjs text eol=lf
+
+# Web
+*.html text eol=lf
+*.css text eol=lf
+*.json text eol=lf
+
+# Config
+*.yml text eol=lf
+*.yaml text eol=lf
+*.md text eol=lf
+*.sh text eol=lf
+
+# Windows
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+
+# Binaries
+*.exe binary
+*.dll binary
+*.ico binary
+*.png binary
+*.jpg binary
+*.svg text eol=lf
