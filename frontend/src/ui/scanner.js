@@ -4,6 +4,7 @@ import { escapeAttribute, escapeHtml, formatBytes, jsArg } from '../utils.js';
 import * as ssh from './ssh.js';
 import { CalculateHealthScore } from '../../wailsjs/go/main/App.js';
 import { EventsOn } from '../../wailsjs/runtime/runtime.js';
+import { VirtualScroller } from './virtual-scroll.js';
 
 export function onConnectionTypeChanged(type) {
     const browseBtn = document.getElementById('btn-browse-folder');
@@ -341,29 +342,74 @@ export async function loadStorageExhaustionForecast() {
     }
 }
 
-export function populateFilesTable(tableId, filesList) {
-    const tbody = document.querySelector(`#${tableId} tbody`);
-    tbody.innerHTML = '';
+const _vsInstances = {};
 
+export function populateFilesTable(tableId, filesList) {
     if (!filesList || filesList.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="4" class="text-center" style="color: var(--text-muted); font-style: italic;">Файлів не знайдено</td></tr>';
+        if (_vsInstances[tableId]) {
+            _vsInstances[tableId].setItems([]);
+        } else {
+            const tbody = document.querySelector(`#${tableId} tbody`);
+            if (tbody) {
+                tbody.innerHTML = '<tr><td colspan="4" class="text-center" style="color: var(--text-muted); font-style: italic;">Файлів не знайдено</td></tr>';
+            }
+        }
         return;
     }
 
-    const rows = [];
-    filesList.forEach(f => {
-        const handler = `confirmSingleDelete(this, ${jsArg(f.path)})`;
-        
-        rows.push(`<tr>
-            <td style="word-break: break-all;">${escapeHtml(f.path)}</td>
-            <td style="white-space: nowrap;">${escapeHtml(f.size_formatted)}</td>
-            <td style="color: var(--text-secondary);">${escapeHtml(f.rule_match || '-')}</td>
-            <td class="col-action">
-                <button class="btn-icon delete" onclick="${escapeAttribute(handler)}">🗑️</button>
-            </td>
-        </tr>`);
+    const existing = _vsInstances[tableId];
+    if (existing) {
+        existing.setItems(filesList);
+        return;
+    }
+
+    const table = document.querySelector(`#${tableId}`);
+    const container = table.closest('.table-container');
+
+    const thead = table.querySelector('thead');
+    const thCells = thead.querySelectorAll('th');
+    table.remove();
+
+    const header = document.createElement('div');
+    header.style.cssText = [
+        'position:sticky;top:0;z-index:2;',
+        'display:grid;grid-template-columns:1fr auto auto 60px;',
+        'background:var(--bg-input);font-weight:600;font-size:13.5px;',
+        'color:var(--text-secondary);border-bottom:1px solid var(--border-color);'
+    ].join('');
+
+    thCells.forEach(th => {
+        const cell = document.createElement('div');
+        cell.textContent = th.textContent;
+        cell.style.padding = '12px 16px';
+        if (th.classList.contains('col-action')) {
+            cell.style.textAlign = 'center';
+        }
+        header.appendChild(cell);
     });
-    tbody.innerHTML = rows.join('');
+    container.appendChild(header);
+
+    const vs = new VirtualScroller({
+        container,
+        noOverflowX: true,
+        itemHeight: 40,
+        renderItem: (item) => {
+            const row = document.createElement('div');
+            row.style.display = 'grid';
+            row.style.gridTemplateColumns = '1fr auto auto 60px';
+            const handler = `confirmSingleDelete(this, ${jsArg(item.path)})`;
+            row.innerHTML = [
+                `<div style="word-break:break-all;padding:12px 16px;border-bottom:1px solid var(--border-color);font-size:13.5px;">${escapeHtml(item.path)}</div>`,
+                `<div style="white-space:nowrap;padding:12px 16px;border-bottom:1px solid var(--border-color);font-size:13.5px;">${escapeHtml(item.size_formatted)}</div>`,
+                `<div style="color:var(--text-secondary);padding:12px 16px;border-bottom:1px solid var(--border-color);font-size:13.5px;">${escapeHtml(item.rule_match || '-')}</div>`,
+                `<div style="text-align:center;padding:12px 16px;border-bottom:1px solid var(--border-color);font-size:13.5px;"><button class="btn-icon delete" onclick="${escapeAttribute(handler)}">🗑️</button></div>`
+            ].join('');
+            return row;
+        }
+    });
+
+    _vsInstances[tableId] = vs;
+    vs.setItems(filesList);
 }
 
 export function renderDuplicatesPane(dupGroups) {
