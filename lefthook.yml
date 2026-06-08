@@ -1,0 +1,19 @@
+# lefthook.yml
+pre-commit:
+  parallel: false
+  commands:
+    go-test:
+      glob: "*.go"
+      run: go test ./backend/... -count=1
+    go-vet:
+      glob: "*.go"
+      run: go vet ./backend/...
+    frontend-test:
+      root: frontend
+      glob: "*.{js,jsx,ts,tsx,vue}"
+      run: npx vitest run --changed
+
+commit-msg:
+  commands:
+    commit-lint:
+      run: echo "Commit message: {1}"
