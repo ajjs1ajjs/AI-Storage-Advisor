@@ -27,12 +27,13 @@ type SavedAIProvider struct {
 }
 
 type SavedSSHHost struct {
-	Name        string `json:"name"`
-	Host        string `json:"host"`
-	Port        int    `json:"port"`
-	Username    string `json:"username"`
-	AuthType    string `json:"auth_type"`
-	Credentials string `json:"credentials"`
+	Name          string `json:"name"`
+	Host          string `json:"host"`
+	Port          int    `json:"port"`
+	Username      string `json:"username"`
+	AuthType      string `json:"auth_type"`
+	Credentials   string `json:"credentials"`
+	KeyPassphrase string `json:"key_passphrase"`
 }
 
 type SavedAnalysisResult struct {
@@ -105,7 +106,7 @@ func ExportProfile(profileID int, filePath string, password string) error {
 	}
 
 	// 4. Fetch SSH Hosts
-	rowsSSH, err := db.DB.Query("SELECT name, host, port, username, auth_type, credentials FROM ssh_hosts WHERE profile_id = ?", profileID)
+	rowsSSH, err := db.DB.Query("SELECT name, host, port, username, auth_type, credentials, key_passphrase FROM ssh_hosts WHERE profile_id = ?", profileID)
 	if err != nil {
 		return err
 	}
@@ -113,12 +114,18 @@ func ExportProfile(profileID int, filePath string, password string) error {
 	var sshHosts []SavedSSHHost
 	for rowsSSH.Next() {
 		var sh SavedSSHHost
-		var encryptedCred sql.NullString
-		if err := rowsSSH.Scan(&sh.Name, &sh.Host, &sh.Port, &sh.Username, &sh.AuthType, &encryptedCred); err == nil {
+		var encryptedCred, encryptedPassphrase sql.NullString
+		if err := rowsSSH.Scan(&sh.Name, &sh.Host, &sh.Port, &sh.Username, &sh.AuthType, &encryptedCred, &encryptedPassphrase); err == nil {
 			if encryptedCred.Valid && encryptedCred.String != "" {
 				decrypted, err := security.Decrypt(encryptedCred.String)
 				if err == nil {
 					sh.Credentials = decrypted
+				}
+			}
+			if encryptedPassphrase.Valid && encryptedPassphrase.String != "" {
+				decrypted, err := security.Decrypt(encryptedPassphrase.String)
+				if err == nil {
+					sh.KeyPassphrase = decrypted
 				}
 			}
 			sshHosts = append(sshHosts, sh)
@@ -282,7 +289,16 @@ func ImportProfile(userID int, filePath string, password string) (string, error)
 			encryptedCred = sql.NullString{String: enc, Valid: true}
 		}
 
-		_, err = tx.Exec("INSERT INTO ssh_hosts (profile_id, name, host, port, username, auth_type, credentials) VALUES (?, ?, ?, ?, ?, ?, ?)", profileID, sh.Name, sh.Host, sh.Port, sh.Username, sh.AuthType, encryptedCred)
+		var encryptedPassphrase sql.NullString
+		if sh.KeyPassphrase != "" {
+			enc, err := security.Encrypt(sh.KeyPassphrase)
+			if err != nil {
+				return "", err
+			}
+			encryptedPassphrase = sql.NullString{String: enc, Valid: true}
+		}
+
+		_, err = tx.Exec("INSERT INTO ssh_hosts (profile_id, name, host, port, username, auth_type, credentials, key_passphrase) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", profileID, sh.Name, sh.Host, sh.Port, sh.Username, sh.AuthType, encryptedCred, encryptedPassphrase)
 		if err != nil {
 			return "", err
 		}

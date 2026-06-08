@@ -133,9 +133,7 @@ func ProcessRules[T any](results T, activeRules []Rule) T {
 				flaggedCount++
 				flaggedSize += size
 			} else {
-				// rmField should be nil
-				var nilStr *string
-				rmField.Set(reflect.ValueOf(nilStr))
+				rmField.Set(reflect.Zero(rmField.Type()))
 			}
 		}
 	}

@@ -106,7 +106,7 @@ func DryRun(filePaths []string) DryRunResult {
 }
 
 func RecycleFileWindows(filePath string) error {
-	pFrom, err := syscall.UTF16FromString(filePath + "\x00\x00") // Must be double null-terminated
+	pFrom, err := syscall.UTF16FromString(filePath + "\x00")
 	if err != nil {
 		return err
 	}
@@ -149,24 +149,26 @@ func SafeDeleteFile(profileID int, filePath string, useRecycleBin bool) (int64, 
 	}
 
 	if err != nil {
-		// Log failure in DB
-		_, dbErr := db.DB.Exec(
-			"INSERT INTO cleanup_history (profile_id, cleaned_path, size_freed, status, error_message) VALUES (?, ?, 0, 'failed', ?)",
-			profileID, pAbs, err.Error(),
-		)
-		if dbErr != nil {
-			log.Printf("Warning: Failed to log cleanup failure to DB: %v", dbErr)
+		if db.DB != nil {
+			_, dbErr := db.DB.Exec(
+				"INSERT INTO cleanup_history (profile_id, cleaned_path, size_freed, status, error_message) VALUES (?, ?, 0, 'failed', ?)",
+				profileID, pAbs, err.Error(),
+			)
+			if dbErr != nil {
+				log.Printf("Warning: Failed to log cleanup failure to DB: %v", dbErr)
+			}
 		}
 		return 0, err
 	}
 
-	// Log success in DB
-	_, dbErr := db.DB.Exec(
-		"INSERT INTO cleanup_history (profile_id, cleaned_path, size_freed, status) VALUES (?, ?, ?, 'success')",
-		profileID, pAbs, size,
-	)
-	if dbErr != nil {
-		log.Printf("Warning: Failed to log cleanup success to DB: %v", dbErr)
+	if db.DB != nil {
+		_, dbErr := db.DB.Exec(
+			"INSERT INTO cleanup_history (profile_id, cleaned_path, size_freed, status) VALUES (?, ?, ?, 'success')",
+			profileID, pAbs, size,
+		)
+		if dbErr != nil {
+			log.Printf("Warning: Failed to log cleanup success to DB: %v", dbErr)
+		}
 	}
 
 	return size, nil

@@ -171,10 +171,15 @@ func (a *App) GetSSHHosts() ([]map[string]interface{}, error) {
 					decCred = ""
 				}
 			}
-			kp := ""
-			if keyPassphrase.Valid {
-				kp = keyPassphrase.String
+		kp := ""
+		if keyPassphrase.Valid && keyPassphrase.String != "" {
+			var decErr error
+			kp, decErr = security.Decrypt(keyPassphrase.String)
+			if decErr != nil {
+				log.Printf("Warning: failed to decrypt SSH key passphrase for host %s: %v", host, decErr)
+				kp = ""
 			}
+		}
 			results = append(results, map[string]interface{}{
 				"id":             id,
 				"name":           name,
@@ -201,9 +206,18 @@ func (a *App) AddSSHHost(name, host string, port int, username, authType, creden
 		}
 	}
 
+	encPassphrase := ""
+	if keyPassphrase != "" {
+		var err error
+		encPassphrase, err = security.Encrypt(keyPassphrase)
+		if err != nil {
+			return err
+		}
+	}
+
 	_, err := db.DB.Exec(
 		"INSERT INTO ssh_hosts (profile_id, name, host, port, username, auth_type, credentials, key_passphrase) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-		a.profileID, name, host, port, username, authType, encCred, keyPassphrase,
+		a.profileID, name, host, port, username, authType, encCred, encPassphrase,
 	)
 	return err
 }
@@ -219,9 +233,18 @@ func (a *App) EditSSHHost(id int, name, host string, port int, username, authTyp
 		}
 	}
 
+	encPassphrase := ""
+	if keyPassphrase != "" {
+		var err error
+		encPassphrase, err = security.Encrypt(keyPassphrase)
+		if err != nil {
+			return err
+		}
+	}
+
 	_, err := db.DB.Exec(
 		"UPDATE ssh_hosts SET name = ?, host = ?, port = ?, username = ?, auth_type = ?, credentials = ?, key_passphrase = ? WHERE id = ? AND profile_id = ?",
-		name, host, port, username, authType, encCred, keyPassphrase, id, a.profileID,
+		name, host, port, username, authType, encCred, encPassphrase, id, a.profileID,
 	)
 	return err
 }
@@ -401,9 +424,9 @@ func (a *App) StartScan(connType string, hostID int, scanPath string) string {
 
 		if connType == "SSH Remote Linux" {
 			// Fetch host configuration
-			var host, username, authType, credentials, keyPassphrase string
+			var host, username, authType, credentials, encPassphrase string
 			var port int
-			errHost := db.DB.QueryRow("SELECT host, port, username, auth_type, credentials, key_passphrase FROM ssh_hosts WHERE id = ? AND profile_id = ?", hostID, a.profileID).Scan(&host, &port, &username, &authType, &credentials, &keyPassphrase)
+			errHost := db.DB.QueryRow("SELECT host, port, username, auth_type, credentials, key_passphrase FROM ssh_hosts WHERE id = ? AND profile_id = ?", hostID, a.profileID).Scan(&host, &port, &username, &authType, &credentials, &encPassphrase)
 			if errHost != nil {
 				runtime.EventsEmit(a.ctx, "scan:finished", map[string]interface{}{"error": "Saved SSH Host credentials not found."})
 				return
@@ -414,6 +437,14 @@ func (a *App) StartScan(connType string, hostID int, scanPath string) string {
 				decCredentials, decErr = security.Decrypt(credentials)
 				if decErr != nil {
 					log.Printf("Warning: failed to decrypt SSH credentials for scan: %v", decErr)
+				}
+			}
+			keyPassphrase := ""
+			if encPassphrase != "" {
+				var decErr error
+				keyPassphrase, decErr = security.Decrypt(encPassphrase)
+				if decErr != nil {
+					log.Printf("Warning: failed to decrypt SSH key passphrase for scan: %v", decErr)
 				}
 			}
 
@@ -530,9 +561,9 @@ func (a *App) CancelScan() {
 // DryRunCleanup checks file sizes and write access
 func (a *App) DryRunCleanup(connType string, hostID int, filePaths []string) (cleanup.DryRunResult, error) {
 	if connType == "SSH Remote Linux" {
-		var host, username, authType, credentials, keyPassphrase string
+		var host, username, authType, credentials, encPassphrase string
 		var port int
-		errHost := db.DB.QueryRow("SELECT host, port, username, auth_type, credentials, key_passphrase FROM ssh_hosts WHERE id = ? AND profile_id = ?", hostID, a.profileID).Scan(&host, &port, &username, &authType, &credentials, &keyPassphrase)
+		errHost := db.DB.QueryRow("SELECT host, port, username, auth_type, credentials, key_passphrase FROM ssh_hosts WHERE id = ? AND profile_id = ?", hostID, a.profileID).Scan(&host, &port, &username, &authType, &credentials, &encPassphrase)
 		if errHost != nil {
 			return cleanup.DryRunResult{}, errHost
 		}
@@ -542,6 +573,14 @@ func (a *App) DryRunCleanup(connType string, hostID int, filePaths []string) (cl
 			decCredentials, decErr = security.Decrypt(credentials)
 			if decErr != nil {
 				log.Printf("Warning: failed to decrypt SSH credentials for dry run: %v", decErr)
+			}
+		}
+		keyPassphrase := ""
+		if encPassphrase != "" {
+			var decErr error
+			keyPassphrase, decErr = security.Decrypt(encPassphrase)
+			if decErr != nil {
+				log.Printf("Warning: failed to decrypt SSH key passphrase for dry run: %v", decErr)
 			}
 		}
 		client, err := scanner.ConnectSSH(host, port, username, authType, decCredentials, keyPassphrase)
@@ -590,9 +629,9 @@ func (a *App) SafeDeleteFiles(connType string, hostID int, filePaths []string, u
 		var failedPaths []map[string]interface{}
 
 		if connType == "SSH Remote Linux" {
-			var host, username, authType, credentials, keyPassphrase string
+			var host, username, authType, credentials, encPassphrase string
 			var port int
-			errHost := db.DB.QueryRow("SELECT host, port, username, auth_type, credentials, key_passphrase FROM ssh_hosts WHERE id = ? AND profile_id = ?", hostID, a.profileID).Scan(&host, &port, &username, &authType, &credentials, &keyPassphrase)
+			errHost := db.DB.QueryRow("SELECT host, port, username, auth_type, credentials, key_passphrase FROM ssh_hosts WHERE id = ? AND profile_id = ?", hostID, a.profileID).Scan(&host, &port, &username, &authType, &credentials, &encPassphrase)
 			if errHost != nil {
 				runtime.EventsEmit(a.ctx, "delete:finished", map[string]interface{}{
 					"deleted_count":        0,
@@ -608,6 +647,14 @@ func (a *App) SafeDeleteFiles(connType string, hostID int, filePaths []string, u
 				decCredentials, decErr = security.Decrypt(credentials)
 				if decErr != nil {
 					log.Printf("Warning: failed to decrypt SSH credentials for delete: %v", decErr)
+				}
+			}
+			keyPassphrase := ""
+			if encPassphrase != "" {
+				var decErr error
+				keyPassphrase, decErr = security.Decrypt(encPassphrase)
+				if decErr != nil {
+					log.Printf("Warning: failed to decrypt SSH key passphrase for delete: %v", decErr)
 				}
 			}
 			client, err := scanner.ConnectSSH(host, port, username, authType, decCredentials, keyPassphrase)
@@ -776,9 +823,9 @@ func (a *App) QueryAIChat(history []providers.ChatMessage) (string, error) {
 // ClearContainerLogs truncates logs for a specific Docker container
 func (a *App) ClearContainerLogs(connType string, hostID int, containerID string) error {
 	if connType == "SSH Remote Linux" {
-		var host, username, authType, credentials, keyPassphrase string
+		var host, username, authType, credentials, encPassphrase string
 		var port int
-		errHost := db.DB.QueryRow("SELECT host, port, username, auth_type, credentials, key_passphrase FROM ssh_hosts WHERE id = ? AND profile_id = ?", hostID, a.profileID).Scan(&host, &port, &username, &authType, &credentials, &keyPassphrase)
+		errHost := db.DB.QueryRow("SELECT host, port, username, auth_type, credentials, key_passphrase FROM ssh_hosts WHERE id = ? AND profile_id = ?", hostID, a.profileID).Scan(&host, &port, &username, &authType, &credentials, &encPassphrase)
 		if errHost != nil {
 			return errHost
 		}
@@ -788,6 +835,14 @@ func (a *App) ClearContainerLogs(connType string, hostID int, containerID string
 			decCredentials, decErr = security.Decrypt(credentials)
 			if decErr != nil {
 				log.Printf("Warning: failed to decrypt SSH credentials: %v", decErr)
+			}
+		}
+		keyPassphrase := ""
+		if encPassphrase != "" {
+			var decErr error
+			keyPassphrase, decErr = security.Decrypt(encPassphrase)
+			if decErr != nil {
+				log.Printf("Warning: failed to decrypt SSH key passphrase: %v", decErr)
 			}
 		}
 		client, err := scanner.ConnectSSH(host, port, username, authType, decCredentials, keyPassphrase)
@@ -825,9 +880,9 @@ func (a *App) ClearPackageCache(connType string, hostID int, cleanCmd string, ca
 	}
 
 	if connType == "SSH Remote Linux" {
-		var host, username, authType, credentials, keyPassphrase string
+		var host, username, authType, credentials, encPassphrase string
 		var port int
-		errHost := db.DB.QueryRow("SELECT host, port, username, auth_type, credentials, key_passphrase FROM ssh_hosts WHERE id = ? AND profile_id = ?", hostID, a.profileID).Scan(&host, &port, &username, &authType, &credentials, &keyPassphrase)
+		errHost := db.DB.QueryRow("SELECT host, port, username, auth_type, credentials, key_passphrase FROM ssh_hosts WHERE id = ? AND profile_id = ?", hostID, a.profileID).Scan(&host, &port, &username, &authType, &credentials, &encPassphrase)
 		if errHost != nil {
 			return errHost
 		}
@@ -837,6 +892,14 @@ func (a *App) ClearPackageCache(connType string, hostID int, cleanCmd string, ca
 			decCredentials, decErr = security.Decrypt(credentials)
 			if decErr != nil {
 				log.Printf("Warning: failed to decrypt SSH credentials: %v", decErr)
+			}
+		}
+		keyPassphrase := ""
+		if encPassphrase != "" {
+			var decErr error
+			keyPassphrase, decErr = security.Decrypt(encPassphrase)
+			if decErr != nil {
+				log.Printf("Warning: failed to decrypt SSH key passphrase: %v", decErr)
 			}
 		}
 		client, err := scanner.ConnectSSH(host, port, username, authType, decCredentials, keyPassphrase)
@@ -863,9 +926,9 @@ func (a *App) ClearPackageCache(connType string, hostID int, cleanCmd string, ca
 func (a *App) PruneDockerSystem(connType string, hostID int) error {
 	cmdStr := "docker system prune -af --volumes"
 	if connType == "SSH Remote Linux" {
-		var host, username, authType, credentials, keyPassphrase string
+		var host, username, authType, credentials, encPassphrase string
 		var port int
-		errHost := db.DB.QueryRow("SELECT host, port, username, auth_type, credentials, key_passphrase FROM ssh_hosts WHERE id = ? AND profile_id = ?", hostID, a.profileID).Scan(&host, &port, &username, &authType, &credentials, &keyPassphrase)
+		errHost := db.DB.QueryRow("SELECT host, port, username, auth_type, credentials, key_passphrase FROM ssh_hosts WHERE id = ? AND profile_id = ?", hostID, a.profileID).Scan(&host, &port, &username, &authType, &credentials, &encPassphrase)
 		if errHost != nil {
 			return errHost
 		}
@@ -875,6 +938,14 @@ func (a *App) PruneDockerSystem(connType string, hostID int) error {
 			decCredentials, decErr = security.Decrypt(credentials)
 			if decErr != nil {
 				log.Printf("Warning: failed to decrypt SSH credentials: %v", decErr)
+			}
+		}
+		keyPassphrase := ""
+		if encPassphrase != "" {
+			var decErr error
+			keyPassphrase, decErr = security.Decrypt(encPassphrase)
+			if decErr != nil {
+				log.Printf("Warning: failed to decrypt SSH key passphrase: %v", decErr)
 			}
 		}
 		client, err := scanner.ConnectSSH(host, port, username, authType, decCredentials, keyPassphrase)
@@ -911,9 +982,9 @@ func isAllowedPackageCleanCommand(cleanCmd string) bool {
 func (a *App) VacuumJournaldLogs(connType string, hostID int) error {
 	cmdStr := "journalctl --vacuum-time=3d"
 	if connType == "SSH Remote Linux" {
-		var host, username, authType, credentials, keyPassphrase string
+		var host, username, authType, credentials, encPassphrase string
 		var port int
-		errHost := db.DB.QueryRow("SELECT host, port, username, auth_type, credentials, key_passphrase FROM ssh_hosts WHERE id = ? AND profile_id = ?", hostID, a.profileID).Scan(&host, &port, &username, &authType, &credentials, &keyPassphrase)
+		errHost := db.DB.QueryRow("SELECT host, port, username, auth_type, credentials, key_passphrase FROM ssh_hosts WHERE id = ? AND profile_id = ?", hostID, a.profileID).Scan(&host, &port, &username, &authType, &credentials, &encPassphrase)
 		if errHost != nil {
 			return errHost
 		}
@@ -923,6 +994,14 @@ func (a *App) VacuumJournaldLogs(connType string, hostID int) error {
 			decCredentials, decErr = security.Decrypt(credentials)
 			if decErr != nil {
 				log.Printf("Warning: failed to decrypt SSH credentials: %v", decErr)
+			}
+		}
+		keyPassphrase := ""
+		if encPassphrase != "" {
+			var decErr error
+			keyPassphrase, decErr = security.Decrypt(encPassphrase)
+			if decErr != nil {
+				log.Printf("Warning: failed to decrypt SSH key passphrase: %v", decErr)
 			}
 		}
 		client, err := scanner.ConnectSSH(host, port, username, authType, decCredentials, keyPassphrase)
