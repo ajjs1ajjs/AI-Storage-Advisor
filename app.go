@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"aisadvisor/backend/cleanup"
 	"aisadvisor/backend/config"
@@ -853,8 +854,18 @@ func (a *App) ClearContainerLogs(connType string, hostID int, containerID string
 
 		// Retrieve container log path and truncate it
 		cmd := fmt.Sprintf("log_path=$(docker inspect --format='{{.LogPath}}' %s) && (sudo truncate -s 0 \"$log_path\" || truncate -s 0 \"$log_path\")", scanner.ShellQuote(containerID))
-		_, errCmd := scanner.RunSSHCommand(client, cmd)
-		return errCmd
+		errCh := make(chan error, 1)
+		go func() {
+			_, err := scanner.RunSSHCommand(client, cmd)
+			errCh <- err
+		}()
+		select {
+		case err := <-errCh:
+			return err
+		case <-time.After(60 * time.Second):
+			client.Close()
+			return fmt.Errorf("SSH command timed out after 60 seconds")
+		}
 	} else {
 		// Local truncate using a helper container to handle WSL Docker Desktop paths
 		logPathCmd := exec.Command("docker", "inspect", "--format", "{{.LogPath}}", containerID)
@@ -908,8 +919,18 @@ func (a *App) ClearPackageCache(connType string, hostID int, cleanCmd string, ca
 		}
 		defer client.Close()
 
-		_, errCmd := scanner.RunSSHCommand(client, cleanCmd)
-		return errCmd
+		errCh := make(chan error, 1)
+		go func() {
+			_, err := scanner.RunSSHCommand(client, cleanCmd)
+			errCh <- err
+		}()
+		select {
+		case err := <-errCh:
+			return err
+		case <-time.After(60 * time.Second):
+			client.Close()
+			return fmt.Errorf("SSH command timed out after 60 seconds")
+		}
 	} else {
 		// Run command locally using native cmd / shell
 		var cmd *exec.Cmd
@@ -954,8 +975,18 @@ func (a *App) PruneDockerSystem(connType string, hostID int) error {
 		}
 		defer client.Close()
 
-		_, errCmd := scanner.RunSSHCommand(client, "sudo "+cmdStr+" || "+cmdStr)
-		return errCmd
+		errCh := make(chan error, 1)
+		go func() {
+			_, err := scanner.RunSSHCommand(client, "sudo "+cmdStr+" || "+cmdStr)
+			errCh <- err
+		}()
+		select {
+		case err := <-errCh:
+			return err
+		case <-time.After(60 * time.Second):
+			client.Close()
+			return fmt.Errorf("SSH command timed out after 60 seconds")
+		}
 	}
 
 	// Local
@@ -1010,8 +1041,18 @@ func (a *App) VacuumJournaldLogs(connType string, hostID int) error {
 		}
 		defer client.Close()
 
-		_, errCmd := scanner.RunSSHCommand(client, "sudo "+cmdStr+" || "+cmdStr)
-		return errCmd
+		errCh := make(chan error, 1)
+		go func() {
+			_, err := scanner.RunSSHCommand(client, "sudo "+cmdStr+" || "+cmdStr)
+			errCh <- err
+		}()
+		select {
+		case err := <-errCh:
+			return err
+		case <-time.After(60 * time.Second):
+			client.Close()
+			return fmt.Errorf("SSH command timed out after 60 seconds")
+		}
 	}
 
 	// Local

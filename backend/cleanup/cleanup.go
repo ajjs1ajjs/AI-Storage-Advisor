@@ -10,6 +10,7 @@ import (
 	"unsafe"
 
 	"aisadvisor/backend/db"
+	"aisadvisor/backend/utils"
 )
 
 // Windows Shell File Operations Constants
@@ -39,18 +40,6 @@ type DryRunResult struct {
 	WritableFiles      []map[string]interface{} `json:"writable_files"`
 	RestrictedFiles    []map[string]interface{} `json:"restricted_files"`
 	CanProceed         bool                     `json:"can_proceed"`
-}
-
-func FormatSize(sizeBytes int64) string {
-	units := []string{"B", "KB", "MB", "GB", "TB"}
-	val := float64(sizeBytes)
-	for _, unit := range units {
-		if val < 1024.0 {
-			return fmt.Sprintf("%.2f %s", val, unit)
-		}
-		val /= 1024.0
-	}
-	return fmt.Sprintf("%.2f PB", val)
 }
 
 func DryRun(filePaths []string) DryRunResult {
@@ -98,7 +87,7 @@ func DryRun(filePaths []string) DryRunResult {
 	return DryRunResult{
 		TotalCount:         totalCount,
 		TotalSize:          totalSize,
-		TotalSizeFormatted: FormatSize(totalSize),
+		TotalSizeFormatted: utils.FormatSize(totalSize),
 		WritableFiles:      writableFiles,
 		RestrictedFiles:    restrictedFiles,
 		CanProceed:         len(writableFiles) > 0,

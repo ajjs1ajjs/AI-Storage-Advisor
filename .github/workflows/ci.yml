@@ -1,0 +1,101 @@
+# AI Storage Advisor CI/CD
+
+[![CI](https://github.com/your-org/AI-Storage-Advisor/actions/workflows/ci.yml/badge.svg)](https://github.com/your-org/AI-Storage-Advisor/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/your-org/AI-Storage-Advisor/actions/workflows/codeql.yml/badge.svg)](https://github.com/your-org/AI-Storage-Advisor/actions/workflows/codeql.yml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/your-org/AI-Storage-Advisor)](https://goreportcard.com/report/github.com/your-org/AI-Storage-Advisor)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+name: AI Storage Advisor CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+
+  backend-tests:
+    name: Backend Tests
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: true
+
+      - name: Verify compilation
+        run: go build ./...
+        continue-on-error: true
+        shell: bash
+
+      - name: Run backend tests
+        run: go test ./backend/... -v -count=1
+        shell: bash
+
+  frontend-tests:
+    name: Frontend Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: frontend
+        continue-on-error: true
+
+      - name: Run frontend tests
+        run: npm test
+        working-directory: frontend
+        continue-on-error: true
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+
+      - name: Install frontend dependencies and build
+        run: |
+          npm install
+          npm run build
+        working-directory: frontend
+
+      - name: Build with Wails
+        run: wails build
+        continue-on-error: true

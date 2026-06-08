@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"aisadvisor/backend/utils"
 )
 
 func TestFormatSize(t *testing.T) {
@@ -21,7 +23,7 @@ func TestFormatSize(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		got := FormatSize(tt.bytes)
+		got := utils.FormatSize(tt.bytes)
 		if got != tt.want {
 			t.Errorf("FormatSize(%d) = %q, want %q", tt.bytes, got, tt.want)
 		}

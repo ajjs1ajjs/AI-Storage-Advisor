@@ -19,6 +19,7 @@ import (
 
 	"aisadvisor/backend/rules"
 	"aisadvisor/backend/sre"
+	"aisadvisor/backend/utils"
 )
 
 type FileInfo struct {
@@ -57,15 +58,7 @@ type ScanResults struct {
 }
 
 func FormatSize(sizeBytes int64) string {
-	units := []string{"B", "KB", "MB", "GB", "TB"}
-	val := float64(sizeBytes)
-	for _, unit := range units {
-		if val < 1024.0 {
-			return fmt.Sprintf("%.2f %s", val, unit)
-		}
-		val /= 1024.0
-	}
-	return fmt.Sprintf("%.2f PB", val)
+	return utils.FormatSize(sizeBytes)
 }
 
 func ScanLocalDisk(ctx context.Context, startPath string, activeRules []rules.Rule, progressCallback func(currentDir string, filesScanned int, totalSize int64)) (ScanResults, error) {
